@@ -1,0 +1,78 @@
+name: window-resize-corner-grab
+description: |
+  A `grab_window` pinch whose ray-hit lands OUTSIDE the central UV body
+  band (i.e. on an edge or corner) must drive the new RESIZE path: the
+  fixed corner stays world-fixed, the dragged corner follows the hand
+  along the window's local right/up axes, and `wlr_xdg_toplevel_set_size`
+  configures arrive at granularity-gated 16 px buckets with the WYSIWYG
+  pixels-per-metre preserved from BEGIN.
+
+  Regression for hand_input.c's GE_ACTION_WINDOW_MOVE BEGIN dispatch and
+  for the corner-anchored resize math: a sign error on `fixed_sx/fixed_sy`
+  would resize *toward* the dragged corner (shrinking instead of growing)
+  or move the fixed corner.
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-corner-grab-resize
+  # XWayland views have no impl->set_size today; this spec assumes xdg-shell
+  # (foot/gtk/etc).  See plans/2026-05-28-window-corner-grab-resize-snap-plane/
+  # plan.md §"Failure modes" for the xwayland follow-up.
+  - surface: xdg-shell
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    spawn_client name=test_panel surface=xdg-shell size_px=(800,600) \
+                 world_pos=(0.0, 0.6, -1.0) at_ts=100ms
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=200ms
+    # BEGIN at UV (0.95, 0.05) — top-right corner.  Local axes follow the
+    # convention u→+x, v inverted to +y (project_point_onto_view), so the
+    # fixed corner is bottom-left (fixed_sx=-1, fixed_sy=-1).
+    # Pinch midpoint in world: panel at (0, 0.6, -1) of size 1.0×0.75 m.
+    # UV(0.95, 0.05) → local (+0.45 m, +0.36 m) → world (0.45, 0.96, -1.0).
+    gesture name=grab_window type=BEGIN \
+            pinch_midpoint=(0.45, 0.96, -1.0) at_ts=500ms
+    # Drag hand +0.10 m along engine y (= world x) AND -0.10 m along
+    # engine x (= world y... wait — engine x → world y per the axis swap;
+    # we want world y up, so delta[0] should be +0.10).
+    gesture name=grab_window type=UPDATE delta=(0.10, 0.10, 0.0) at_ts=700ms
+    gesture name=grab_window type=END at_ts=900ms
+
+expectations:
+  # Bottom-left world corner unchanged (within tolerance — visual matrix
+  # may bridge slightly until last set_size lands).  Panel started with
+  # bottom-left at world (-0.5, 0.225, -1.0).
+  - kind: window-corner-world-position
+    name: test_panel
+    corner: bottom-left
+    at_ts: 1200ms
+    expected_xyz: (-0.5, 0.225, -1.0)
+    tolerance_m: 0.005
+  # New pixel size: at default move_gain=3.0, accum world delta is
+  # (+0.30 m, +0.30 m, 0).  Projected onto right=(+1,0,0) and up=(0,+1,0)
+  # gives du=+0.30, dv=+0.30.  new_w_m = 1.0 - (-1) * 0.30 = 1.30 m;
+  # new_h_m = 0.75 - (-1) * 0.30 = 1.05 m.  At ppm=800: new_px=(1040, 840).
+  - kind: wlr_xdg_toplevel_set_size
+    name: test_panel
+    at_or_before_ts: 1100ms
+    expected_w_h_px: [1040, 840]
+    tolerance_px: 16
+  # MOVE path must NOT have run — spring target should not have shifted
+  # by the move_gain-amplified delta (which would put it at (0.30, 0.90,
+  # -1.0); the resize visual matrix puts the centre elsewhere).
+  - kind: view-anim-target
+    name: test_panel
+    at_ts: 1200ms
+    expected_xyz_not: (0.30, 0.90, -1.0)
+  # No snap (no plane advertised) — anchor must remain cleared.
+  - kind: view-has-anchor
+    name: test_panel
+    at_ts: 1200ms
+    expected: false
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

@@ -1,0 +1,24 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+# node
+node_modules/
+dist/
+.next/
+# env / secrets
+.env
+.env.*
+*.key
+credentials*.json
+# os / editors
+.DS_Store
+.vscode/
+.idea/
+# data / outputs
+*.mp4
+*.mov
+outputs/
+data/raw/

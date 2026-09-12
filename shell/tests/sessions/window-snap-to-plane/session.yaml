@@ -1,0 +1,61 @@
+name: window-snap-to-plane
+description: |
+  On `grab_window` END, the released view must be matched against current
+  ARKit planes via predicate (i): centre-projected-onto-plane within plane
+  extent AND perpendicular distance < `theme_runtime_get()->snap_magnetism_m`.
+  When the release lands close to a horizontal plane in front of the user,
+  `view->anchor_uuid` must be written with that plane's UUID and
+  `has_anchor` must flip to true; `wxrd_anchors_update` then drives the
+  matrix onto plane-centre + hover_distance_m on the next frame.
+
+  Regression for the new wxrd_anchors_try_snap helper and for the
+  END-hook in hand_input.c's WINDOW_MOVE handler.
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-snap-to-plane
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    # Horizontal plane 1 m forward, 1 m x 1 m extent, normal +Y.
+    plane uuid=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+          center=(0.0, 0.0, -1.0) normal=(0.0, 1.0, 0.0) \
+          extent=(1.0, 1.0) at_ts=50ms
+    spawn_client name=test_panel size_px=(800,600) \
+                 world_pos=(0.0, 0.4, -1.0) at_ts=200ms
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=300ms
+    # BEGIN body grab; UV ~ (0.5, 0.5) means MOVE mode.
+    gesture name=grab_window type=BEGIN \
+            pinch_midpoint=(0.0, 0.4, -0.9) at_ts=500ms
+    # Drag the panel down to 5 cm above the plane (well within the 8 cm
+    # snap_magnetism_m default).  Panel starts at y=0.4; want y≈0.05.
+    # With move_gain=3.0, total raw hand delta needs to be -(0.35/3.0)
+    # ≈ -0.117 m on engine x (= world y).
+    gesture name=grab_window type=UPDATE delta=(-0.117, 0.0, 0.0) at_ts=700ms
+    gesture name=grab_window type=END at_ts=900ms
+
+expectations:
+  # Anchor was assigned to plane bbbb...
+  - kind: view-has-anchor
+    name: test_panel
+    at_ts: 1500ms
+    expected: true
+  - kind: view-anchor-uuid
+    name: test_panel
+    at_ts: 1500ms
+    expected_uuid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  # Next frame: wxrd_anchors_update writes plane_to_matrix → centre +
+  # hover_distance_m along normal.  At default hover_distance_m=0.02 the
+  # panel sits at world y = 0 + 0.02 = 0.02 m.
+  - kind: view-world-position
+    name: test_panel
+    at_ts: 1150ms
+    expected_xyz: (0.0, 0.02, -1.0)
+    tolerance_m: 0.005
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

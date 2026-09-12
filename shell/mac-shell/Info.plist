@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     FINAL APP IDENTITY — DO NOT CHANGE CFBundleIdentifier.
+
+     macOS TCC keys Screen Recording / Accessibility grants to the bundle
+     identifier + code signature. Changing `com.spatialos.spatula` (or the
+     signing identity) makes macOS treat this as a brand-new app: every
+     permission the user granted is silently dropped and stale rows pile up
+     in System Settings. That churn is exactly what this identity was picked
+     to end. The executable name (mac-shell) is internal and free to keep.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>mac-shell</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.spatialos.spatula</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Spatula</string>
+	<key>CFBundleDisplayName</key>
+	<string>Spatula</string>
+	<key>CFBundleIconFile</key>
+	<string>Spatula</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Spatula captures the windows you launch as spatial panels via ScreenCaptureKit.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Spatula receives ARKit pose, plane, and camera packets from the SpatialBridge iPhone app over your local WiFi network (UDP 9898).</string>
+</dict>
+</plist>

@@ -1,0 +1,197 @@
+# AUTO-GENERATED via tools/print_default_config — do not edit by hand.
+#
+# Canonical sample for ~/.config/spatial-os/gestures.toml.  Every value
+# is the compiled default in gesture-engine/src/engine.cpp; loading this
+# file unchanged is a no-op (tests/test_config.cpp verifies that).
+#
+# Schema:
+#   [gesture_name]            applies to EVERY variant of that name
+#   [gesture_name.variant]    applies to one variant only
+#   min_hold_ms               = <int>     # how long trigger must hold before BEGIN
+#   cooldown_ms               = <int>     # min gap after END/CANCEL before re-trigger
+#   max_active_ms             = <int>     # auto-END after this long Active (0 = never)
+#   indeterminate_release_ms  = <int>     # give up after this long of NaN features
+#   trigger.<feature_name>    = <float>   # threshold for a trigger condition
+#   release.<feature_name>    = <float>   # threshold for a release condition
+#   trigger.<feature_name>.<op> = <float> # one of two conditions on the same feature
+#
+# A gesture name with several compiled definitions (variants) prints one
+# [name.variant] section per definition.  Repeating a section header is
+# an error; the repeat is ignored.
+#
+# Comparison operators (less / greater / less_eq / greater_eq) are NOT
+# overridable here — the operator is part of the gesture definition.
+# Only the threshold value is tuneable; the operator is shown as a
+# trailing comment for reference (and as a key suffix only where a
+# feature carries two conditions in one list).
+#
+# Gestures are listed in priority-descending order (the order the
+# engine's suppression matrix iterates them in).
+
+[filter]
+# Global One-Euro jitter filter on joint positions feeding the FSM
+# (see src/one_euro.h).  min_cutoff governs jitter rejection at
+# rest; beta opens the cutoff with speed so intentional motion
+# stays snappy; d_cutoff smooths the speed estimate.  Joints below
+# min_joint_confidence are excluded from triggers (indeterminate).
+# min_cutoff and d_cutoff must be > 0, beta >= 0, confidence in [0, 1];
+# anything else is logged and the compiled default kept.
+one_euro_enabled       = 1
+one_euro_min_cutoff_hz = 1.5
+one_euro_beta          = 30
+one_euro_d_cutoff_hz   = 1
+min_joint_confidence   = 0.15
+
+[keyboard_anchor]
+# action=GE_ACTION_KEYBOARD_ANCHOR priority=5
+min_hold_ms = 1500
+cooldown_ms = 300
+max_active_ms = 0
+indeterminate_release_ms = 300
+trigger.palm_normal_y                  = -0.85     # less
+trigger.all_fingers_curl               = 0.18      # less
+trigger.thumb_index_distance           = 0.03      # greater
+trigger.index_curl                     = 0.08      # less
+trigger.fist_launcher_end_recency_ms   = 2000      # greater
+release.palm_normal_y                  = -0.4      # greater
+release.all_fingers_curl               = 0.25      # greater
+
+[fist_launcher.per_frame]
+# action=GE_ACTION_TOGGLE_LAUNCHER priority=4
+min_hold_ms = 300
+cooldown_ms = 0
+max_active_ms = 10000
+indeterminate_release_ms = 300
+trigger.all_fingers_curl               = 0.33      # greater
+trigger.index_curl                     = 0.25      # greater
+trigger.middle_curl                    = 0.25      # greater
+trigger.ring_curl                      = 0.25      # greater
+trigger.pinky_curl                     = 0.25      # greater
+release.all_fingers_curl               = 0.2       # less
+
+[fist_launcher.windowed]
+# action=GE_ACTION_TOGGLE_LAUNCHER priority=4
+min_hold_ms = 300
+cooldown_ms = 0
+max_active_ms = 10000
+indeterminate_release_ms = 300
+trigger.all_fingers_curl               = 0.33      # greater
+trigger.pinky_curl                     = 0.25      # greater
+trigger.index_curl_max_over_200ms      = 0.25      # greater
+trigger.middle_curl_max_over_200ms     = 0.25      # greater
+trigger.ring_curl_max_over_200ms       = 0.25      # greater
+release.all_fingers_curl               = 0.2       # less
+
+[pinch_right_click]
+# action=GE_ACTION_POINTER_RIGHT_CLICK priority=3
+min_hold_ms = 80
+cooldown_ms = 200
+max_active_ms = 250
+indeterminate_release_ms = 300
+trigger.thumb_middle_distance          = 0.025     # less
+trigger.thumb_index_distance           = 0.03      # less
+trigger.all_fingers_curl               = 0.3       # less
+trigger.thumb_index_convergence_ratio  = 0.1       # greater
+trigger.middle_tip_direction_to_thumb_cos = 0         # greater
+trigger.wrist_speed_mps                = 0.8       # less
+release.thumb_middle_distance          = 0.03      # greater
+
+[scroll.tight]
+# action=GE_ACTION_SCROLL priority=2
+min_hold_ms = 120
+cooldown_ms = 100
+max_active_ms = 0
+indeterminate_release_ms = 300
+trigger.thumb_index_distance           = 0.035     # less
+trigger.thumb_to_index_line_distance   = 0.03      # less
+trigger.all_fingers_curl               = 0.26      # less
+trigger.ring_curl                      = 0.25      # less
+trigger.thumb_on_index_projection      = 0.4       # greater
+trigger.thumb_index_recency_above_30mm_ms = 1000      # less
+trigger.thumb_index_convergence_ratio  = 0.2       # greater
+trigger.fist_launcher_end_recency_ms   = 500       # greater
+trigger.wrist_speed_mps                = 0.8       # less
+release.thumb_index_distance           = 0.055     # greater
+release.thumb_on_index_projection_range_500ms = 0.02      # less
+
+[scroll.wide]
+# action=GE_ACTION_SCROLL priority=2
+min_hold_ms = 100
+cooldown_ms = 100
+max_active_ms = 0
+indeterminate_release_ms = 300
+trigger.thumb_index_distance.less      = 0.07      # less
+trigger.thumb_index_distance.greater   = 0.02      # greater
+trigger.thumb_to_index_line_distance   = 0.05      # less
+trigger.all_fingers_curl               = 0.26      # less
+trigger.ring_curl                      = 0.25      # less
+trigger.thumb_on_index_projection      = 0.4       # greater
+trigger.thumb_index_convergence_ratio  = 0.25      # greater
+trigger.thumb_on_index_projection_range_500ms = 0.14      # greater
+trigger.fist_launcher_end_recency_ms   = 500       # greater
+trigger.wrist_speed_mps                = 0.8       # less
+release.thumb_index_distance           = 0.083     # greater
+release.thumb_on_index_projection_range_500ms = 0.02      # less
+
+[pinch_select.standard]
+# action=GE_ACTION_POINTER_CLICK priority=1
+min_hold_ms = 60
+cooldown_ms = 60
+max_active_ms = 250
+indeterminate_release_ms = 300
+trigger.thumb_index_distance           = 0.035     # less
+trigger.thumb_to_index_line_distance   = 0.032     # less
+trigger.all_fingers_curl               = 0.28      # less
+trigger.ring_curl_max_over_200ms       = 0.25      # less
+trigger.thumb_index_convergence_ratio  = 0.1       # greater
+trigger.thumb_on_index_projection_range_500ms = 0.2       # less
+trigger.fist_launcher_end_recency_ms   = 500       # greater
+trigger.wrist_speed_mps                = 0.8       # less
+release.thumb_index_distance           = 0.048     # greater
+release.thumb_on_index_projection_range_500ms = 0.25      # greater
+
+[pinch_select.loose]
+# action=GE_ACTION_POINTER_CLICK priority=1
+min_hold_ms = 100
+cooldown_ms = 80
+max_active_ms = 250
+indeterminate_release_ms = 300
+trigger.thumb_index_distance           = 0.075     # less
+trigger.thumb_to_index_line_distance   = 0.065     # less
+trigger.all_fingers_curl               = 0.28      # less
+trigger.ring_curl_max_over_200ms       = 0.25      # less
+trigger.thumb_index_convergence_ratio  = 0.25      # greater
+trigger.thumb_index_convergence_velocity_mps = 0.08      # greater
+trigger.fist_launcher_end_recency_ms   = 500       # greater
+trigger.wrist_speed_mps                = 0.8       # less
+release.thumb_index_distance           = 0.088     # greater
+
+[pinch_select.double_tap]
+# action=GE_ACTION_POINTER_CLICK priority=1
+min_hold_ms = 50
+cooldown_ms = 60
+max_active_ms = 250
+indeterminate_release_ms = 300
+trigger.thumb_index_distance           = 0.055     # less
+trigger.thumb_to_index_line_distance   = 0.055     # less
+trigger.all_fingers_curl               = 0.28      # less
+trigger.pinch_select_end_recency_ms    = 700       # less
+trigger.fist_launcher_end_recency_ms   = 500       # greater
+trigger.wrist_speed_mps                = 0.8       # less
+release.thumb_index_distance           = 0.068     # greater
+
+[pinch_select.palm_up]
+# action=GE_ACTION_POINTER_CLICK priority=1
+min_hold_ms = 100
+cooldown_ms = 80
+max_active_ms = 250
+indeterminate_release_ms = 300
+trigger.thumb_index_distance           = 0.075     # less
+trigger.thumb_to_index_line_distance   = 0.06      # less
+trigger.palm_normal_y                  = 0.7       # greater
+trigger.all_fingers_curl               = 0.18      # less
+trigger.thumb_index_convergence_ratio  = 0.2       # greater
+trigger.thumb_index_convergence_velocity_mps = 0.05      # greater
+trigger.fist_launcher_end_recency_ms   = 500       # greater
+trigger.wrist_speed_mps                = 0.8       # less
+release.thumb_index_distance           = 0.088     # greater

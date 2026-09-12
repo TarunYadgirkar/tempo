@@ -1,0 +1,56 @@
+name: window-move-grab-bar
+description: |
+  With the gaze dot on a window's grab-handle bar, a pinch (pinch_select /
+  POINTER_CLICK) MOVES the window instead of delivering a click: the window
+  follows the pinch (grab_move_gain = 1.0, true 1:1) until release.  On
+  release, snap-to-plane runs.
+
+  This is the deliberate move affordance.  It is driven by the existing,
+  eval-clean click gesture gated on gaze-on-bar — NOT by re-enabling
+  grab_window (which regresses scroll recognition).  Guards: NO BTN_LEFT
+  click is delivered to the surface during a bar-move; the translation is
+  the frame-to-frame pinch-midpoint delta with the WINDOW_MOVE axis swap.
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-grab-bar
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    spawn_client name=test_app size_px=(800,600) world_pos=(0.0, 0.6, -1.0) at_ts=100ms
+    # Gaze on the bar below the window (same dir as the hover spec).
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, -0.365, -0.931) at_ts=400ms
+    # Pinch begins while hovering the bar → bar-move (no click).
+    gesture name=pinch_select type=BEGIN pinch_midpoint=(0.0, 0.30, -0.6) at_ts=600ms
+    # Hand drifts +0.10 m on engine x (= world y up) and +0.05 m engine y
+    # (= world x right): two UPDATEs of +0.05 engine-x, +0.025 engine-y.
+    gesture name=pinch_select type=UPDATE pinch_midpoint=(0.025, 0.35, -0.6) at_ts=700ms
+    gesture name=pinch_select type=UPDATE pinch_midpoint=(0.050, 0.40, -0.6) at_ts=800ms
+    gesture name=pinch_select type=END at_ts=1000ms
+
+expectations:
+  # Window translated to follow the pinch.  Accumulated engine delta =
+  # (+0.05 x, +0.10 y, 0 z); axis swap → world (+0.10 x, +0.05 y, 0 z) at
+  # grab_move_gain=1.0.  Start (0,0.6,-1) → target ≈ (0.10, 0.65, -1).
+  - kind: view-anim-target
+    name: test_app
+    at_ts: 1100ms
+    expected_xyz: (0.10, 0.65, -1.0)
+    tolerance_m: 0.02
+  # No click was delivered to the surface during the bar-move.
+  - kind: not-event
+    name: pointer_button
+    target: test_app
+    window_ts: [500ms, 1100ms]
+  # No plane advertised → no anchor after release.
+  - kind: view-has-anchor
+    name: test_app
+    at_ts: 1300ms
+    expected: false
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

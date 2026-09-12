@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "session_id": "20260829-123106-9d88e4",
+  "gesture": {
+    "id": 1,
+    "name": "pinch_select"
+  },
+  "kind": "discrete",
+  "clip_window": {
+    "start_ns": 0,
+    "end_ns": 6000000000
+  },
+  "keyframes": [
+    {
+      "id": "5a51d3fa-bd71-f5bb-3a05-beab0e72d713",
+      "ts_ns": 3089000000,
+      "progress": 1.0
+    }
+  ],
+  "notes": "synthetic (gen_synthetic_session.py --seed 6)"
+}

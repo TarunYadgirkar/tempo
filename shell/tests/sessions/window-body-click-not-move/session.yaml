@@ -1,0 +1,42 @@
+name: window-body-click-not-move
+description: |
+  Guard for the "only the bar moves it" decision AND for the bar intercept
+  not hijacking ordinary clicks.  When the gaze dot is on the window BODY
+  (not the bar) and the user pinches, a normal left-click is delivered to
+  the surface and the window does NOT move.  Body-drag-to-move is gone.
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-grab-bar
+  - role: guard
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    spawn_client name=test_app size_px=(800,600) world_pos=(0.0, 0.6, -1.0) at_ts=100ms
+    # Gaze straight at the window body centre (not the bar).
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=400ms
+    gesture name=pinch_select type=BEGIN pinch_midpoint=(0.0, 0.6, -0.6) at_ts=600ms
+    gesture name=pinch_select type=UPDATE pinch_midpoint=(0.05, 0.6, -0.6) at_ts=700ms
+    gesture name=pinch_select type=END at_ts=900ms
+
+expectations:
+  # A real click landed on the surface (press + release).
+  - kind: pointer_button
+    name: test_app
+    button: BTN_LEFT
+    window_ts: [500ms, 1000ms]
+    expect_press: true
+    expect_release: true
+  # The window did NOT move — anim target unchanged from spawn.
+  - kind: view-anim-target
+    name: test_app
+    at_ts: 1100ms
+    expected_xyz: (0.0, 0.6, -1.0)
+    tolerance_m: 0.005
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

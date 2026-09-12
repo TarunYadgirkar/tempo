@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "labels": [
+    { "id": 1, "name": "pinch_select" },
+    { "id": 2, "name": "fist_launcher" }
+  ]
+}

@@ -1,0 +1,59 @@
+name: window-no-snap-when-far
+description: |
+  Adversarial guard for the snap predicate.  When a `grab_window` END
+  occurs with the view's centre OUTSIDE the snap_magnetism_m perpendicular
+  distance (or OUTSIDE the plane's extent), `wxrd_anchors_try_snap` must
+  NOT assign an anchor.  The panel drops at its current world position
+  ("drop in mid-air" escape hatch).  If this session ever turns green for
+  the wrong reason — i.e. the panel snapped when it should have free-fallen
+  — either the threshold or the predicate (or the in-extent test) has
+  regressed.
+
+  Also exercises the lift-off path: a view that WAS anchored
+  (via SPATIAL_ANCHOR_UUID, the env-var path) and is then released far
+  from any plane must have `has_anchor` CLEARED.
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-snap-to-plane
+  - role: adversarial
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    # Horizontal plane 1 m forward, but only 0.5 m x 0.5 m extent so a
+    # window dragged 0.6 m off to the side falls OUTSIDE the extent test.
+    plane uuid=cccccccccccccccccccccccccccccccc \
+          center=(0.0, 0.0, -1.0) normal=(0.0, 1.0, 0.0) \
+          extent=(0.5, 0.5) at_ts=50ms
+    # Spawn pre-anchored via env-var path to test lift-off.
+    setup_env SPATIAL_ANCHOR_UUID=cccccccccccccccccccccccccccccccc
+    spawn_client name=test_panel size_px=(800,600) \
+                 world_pos=(0.0, 0.0, -1.0) at_ts=200ms
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=300ms
+    # Body grab, drag 0.60 m laterally → outside the 0.5 m extent.
+    # With move_gain=3.0, raw engine y delta = 0.20 m.
+    gesture name=grab_window type=BEGIN \
+            pinch_midpoint=(0.0, 0.0, -0.9) at_ts=500ms
+    gesture name=grab_window type=UPDATE delta=(0.0, 0.20, 0.0) at_ts=700ms
+    gesture name=grab_window type=END at_ts=900ms
+
+expectations:
+  # Anchor was cleared on lift-off.
+  - kind: view-has-anchor
+    name: test_panel
+    at_ts: 1500ms
+    expected: false
+  # Panel free-floats at the spring-target world position (0.60, 0.0, -1.0),
+  # not at the plane centre.
+  - kind: view-world-position
+    name: test_panel
+    at_ts: 1500ms
+    expected_xyz: (0.60, 0.0, -1.0)
+    tolerance_m: 0.01
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

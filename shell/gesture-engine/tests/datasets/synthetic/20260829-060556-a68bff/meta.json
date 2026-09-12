@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "session_id": "20260829-060556-a68bff",
+  "duration_ns": 6000000000,
+  "created_at_ns": 1760000000000000000,
+  "finalized": true,
+  "sha256_cache": {
+    "stream.bin": "6b82f11e752f81f89562fbfe8d518c6b93808a67c2545003eae684b8aa164e3a",
+    "labels.json": "55369d749a3d6fc8250a196420dd63cc143bcc8581b1ca132c6c6fbc5b9ad72e"
+  }
+}

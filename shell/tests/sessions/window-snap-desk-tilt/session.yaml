@@ -1,0 +1,73 @@
+name: window-snap-desk-tilt
+description: |
+  Snap to a HORIZONTAL surface (desk/floor) tilts the window by an
+  ergonomic angle chosen from how far the head is above the surface
+  (horizontal_tilt_deg, constants in theme [spatial] snap_tilt_*):
+    - head ≤ 0.40 m above  → near-upright (~80°, monitor-like)
+    - head ≥ 1.00 m above  → flat (~0°, lying on the surface)
+  Both windows snap to the same plane; only the head height differs, so
+  the resulting tilt differs.  Up stays world-up-ish; the panel leans to
+  face the head.
+
+  Asserted as the angle between the window front-normal and world-up:
+  near-upright → front nearly horizontal (angle ~80° from up); flat →
+  front nearly vertical/up (angle ~0° from up).
+
+# HARNESS REQUIREMENT: the tilt is a function of head height above the
+# surface (g_head_pos.y - plane_center.y), so the replay harness MUST route
+# `head_pose` into wxrd_anchors_set_head_position() — not only into
+# hand_input.  In production both are pushed from the same _render_cb site
+# (main.c).  If the harness feeds only hand_input, NEAR/FAR would resolve
+# off a stale/origin head position and could pass for the wrong reason.
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-snap-to-plane
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    # HORIZONTAL plane (alignment=0) at floor-ish height, 1.5 x 1.5 m.
+    plane uuid=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee alignment=0 \
+          center=(0.0, 0.0, -1.0) normal=(0.0, 1.0, 0.0) \
+          extent=(1.5, 1.5) at_ts=50ms
+
+    # --- Case NEAR: head 0.30 m above the surface → near-upright (~80°). ---
+    head_pose pos=(0.0, 0.30, 0.0) fwd=(0.0, -0.2, -1.0) at_ts=200ms
+    spawn_client name=app_near size_px=(800,600) world_pos=(0.0, 0.06, -1.0) at_ts=250ms
+    gesture name=pinch_select type=BEGIN pinch_midpoint=(0.0, 0.10, -0.6) at_ts=400ms
+    gesture name=pinch_select type=END at_ts=600ms
+
+    # --- Case FAR: head 1.30 m above the surface → flat (~0°). ---
+    head_pose pos=(0.0, 1.30, 0.0) fwd=(0.0, -0.7, -1.0) at_ts=900ms
+    spawn_client name=app_far size_px=(800,600) world_pos=(0.4, 0.06, -1.0) at_ts=950ms
+    gesture name=pinch_select type=BEGIN pinch_midpoint=(0.4, 0.10, -0.6) at_ts=1100ms
+    gesture name=pinch_select type=END at_ts=1300ms
+
+expectations:
+  - kind: view-has-anchor
+    name: app_near
+    at_ts: 800ms
+    expected: true
+  - kind: view-has-anchor
+    name: app_far
+    at_ts: 1500ms
+    expected: true
+  # NEAR (head 0.30 m above): near-upright — front-normal ~80° from world-up
+  # (i.e. nearly horizontal, facing the head).
+  - kind: view-front-normal-angle-from-up
+    name: app_near
+    at_ts: 800ms
+    expected_deg: 80.0
+    tolerance_deg: 12.0
+  # FAR (head 1.30 m above): flat — front-normal ~0° from world-up (points up).
+  - kind: view-front-normal-angle-from-up
+    name: app_far
+    at_ts: 1500ms
+    expected_deg: 0.0
+    tolerance_deg: 12.0
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

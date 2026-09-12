@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "session_id": "20260829-060556-a68bff",
+  "gesture": null,
+  "kind": "continuous",
+  "clip_window": {
+    "start_ns": 0,
+    "end_ns": 6000000000
+  },
+  "keyframes": [],
+  "notes": "synthetic (gen_synthetic_session.py --seed 7)"
+}

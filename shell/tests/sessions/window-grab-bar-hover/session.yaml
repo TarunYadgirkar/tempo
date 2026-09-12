@@ -1,0 +1,63 @@
+name: window-grab-bar-hover
+description: |
+  Every app window gets a thin, slightly-transparent white grab-handle bar
+  rendered just below it (grab_bar.c).  When the centre-of-view gaze dot
+  crosses onto the bar's (generous) hitbox, the bar's hover spring rises:
+  it expands (width × ~1.18, thickness × ~1.6) and brightens (alpha
+  0.35 → 0.85).  When the gaze leaves, it relaxes back.
+
+  Guards: the bar tracks its window every frame (it is repositioned from
+  the window's final matrix after animation_update), and the hover is
+  driven by the same head-gaze ray as the cursor.
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-grab-bar
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    # App window (foot), 800x600 px → 1.0 x 0.75 m at z=-1, centred y=0.6.
+    spawn_client name=test_app size_px=(800,600) world_pos=(0.0, 0.6, -1.0) at_ts=100ms
+    # Bar sits ~ (win bottom y 0.225) - gap - half-thick ≈ y=0.18, z=-1.
+    # t=300ms: gaze on the window body (not the bar) — bar idle.
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=300ms
+    # t=600ms: gaze drops to the bar's centre (~y=0.18 at z=-1 → pitch down).
+    # fwd toward (0, 0.18, -1) from eye (0,0.6,0): dir≈(0,-0.39,-1) normalised.
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, -0.365, -0.931) at_ts=600ms
+    # hold on the bar through 1200ms so the hover spring settles high.
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, -0.365, -0.931) at_ts=1200ms
+    # t=1500ms: gaze back up to the body — hover relaxes.
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=1500ms
+
+expectations:
+  # Bar exists and is below the window.
+  - kind: grab-bar-present
+    name: test_app
+    at_ts: 300ms
+    expected: true
+  # Idle while gaze is on the body.
+  - kind: grab-bar-hover
+    name: test_app
+    at_ts: 300ms
+    expected: false
+  # Hovered + visually grown/brighter after the gaze settles on the bar.
+  - kind: grab-bar-hover
+    name: test_app
+    at_ts: 1200ms
+    expected: true
+  - kind: grab-bar-alpha
+    name: test_app
+    at_ts: 1200ms
+    expected_min: 0.7        # near BAR_ALPHA_HOVER (0.85)
+  # Relaxes after the gaze leaves.
+  - kind: grab-bar-hover
+    name: test_app
+    at_ts: 1900ms
+    expected: false
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

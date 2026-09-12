@@ -1,0 +1,62 @@
+name: window-snap-to-wall
+description: |
+  Snap works on VERTICAL planes (walls), not just horizontal ones.  When a
+  window is released near a vertical plane, it anchors to it AND lies flat
+  on the wall: the window's front-normal aligns with the wall normal
+  (flipped to face the room/head), and its up axis is world-up projected
+  onto the wall.  Regression for the surface-aware plane_to_matrix rewrite
+  (the old code rolled the window 90° on a wall).
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - feature: window-snap-to-plane
+
+input:
+  type: synthetic
+  script: |
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=100ms
+    # VERTICAL plane (alignment=1) 1.5 m ahead, normal facing the user (+Z),
+    # 1.2 x 1.2 m, centred at eye height.
+    plane uuid=dddddddddddddddddddddddddddddddd alignment=1 \
+          center=(0.0, 0.6, -1.5) normal=(0.0, 0.0, 1.0) \
+          extent=(1.2, 1.2) at_ts=50ms
+    spawn_client name=test_app size_px=(800,600) world_pos=(0.0, 0.6, -1.4) at_ts=200ms
+    # Bar-move it the last few cm onto the wall, release within snap radius.
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, -0.365, -0.931) at_ts=400ms
+    gesture name=pinch_select type=BEGIN pinch_midpoint=(0.0, 0.30, -0.7) at_ts=600ms
+    gesture name=pinch_select type=UPDATE pinch_midpoint=(0.0, 0.30, -0.75) at_ts=700ms
+    gesture name=pinch_select type=END at_ts=900ms
+
+expectations:
+  - kind: view-has-anchor
+    name: test_app
+    at_ts: 1300ms
+    expected: true
+  - kind: view-anchor-uuid
+    name: test_app
+    at_ts: 1300ms
+    expected_uuid: dddddddddddddddddddddddddddddddd
+  # Flat on the wall: window front-normal == wall normal (toward user, +Z).
+  - kind: view-front-normal
+    name: test_app
+    at_ts: 1350ms
+    expected_xyz: (0.0, 0.0, 1.0)
+    tolerance: 0.05
+  # Up axis is world-up (vertical wall keeps text upright).
+  - kind: view-up-axis
+    name: test_app
+    at_ts: 1350ms
+    expected_xyz: (0.0, 1.0, 0.0)
+    tolerance: 0.05
+  # Position = plane centre + hover along the (head-facing) normal.
+  - kind: view-world-position
+    name: test_app
+    at_ts: 1350ms
+    expected_xyz: (0.0, 0.6, -1.48)
+    tolerance_m: 0.01
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

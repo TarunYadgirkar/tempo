@@ -1,0 +1,22 @@
+[project]
+name = "tempo"
+version = "0.1.0"
+description = "Room-aware spatial agent for the Tempo shell"
+authors = [
+    { name = "Tarun Yadgirkar", email = "tyadgirkar@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=2.23.0",
+    "numpy>=2.5.3",
+    "pillow>=12.3.0",
+    "python-dotenv>=1.2.3",
+    "sounddevice>=0.5.6",
+]
+
+[project.scripts]
+tempo = "tempo.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"

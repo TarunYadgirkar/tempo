@@ -1,0 +1,58 @@
+name: window-move-body-grab
+description: |
+  A `grab_window` pinch whose ray-hit lands inside the central UV body band
+  ([0.15, 0.85] on both axes) must drive the existing MOVE path: the window's
+  spring-target translates by the hand delta and no `wlr_xdg_toplevel_set_size`
+  configure is emitted.  Regression for the dispatch in hand_input.c's
+  `GE_ACTION_WINDOW_MOVE` BEGIN — a faulty UV calculation would silently
+  divert body grabs into RESIZE and the user would see a translating-+-
+  growing panel.
+
+tags:
+  - expected-pass: true
+  - subsystem: wxrd
+  - subsystem: gesture-engine
+  - feature: window-grab-mode-dispatch
+
+input:
+  type: synthetic
+  script: |
+    # t=0: identity pose so origin_rot capture is benign.
+    pose pos=(0.0, 0.0, 0.0) rot=(0.0, 0.0, 0.0, 1.0) at_ts=0ms
+    # Spawn a foot-sized panel.  At default WXRD_SURFACE_SCALE=800 px/m,
+    # 800x600 px = 1.0 m x 0.75 m, placed at z=-1 m centred ahead.
+    spawn_client name=test_panel size_px=(800,600) world_pos=(0.0, 0.6, -1.0) at_ts=100ms
+    # Head gaze fixed forward.
+    head_pose pos=(0.0, 0.6, 0.0) fwd=(0.0, 0.0, -1.0) at_ts=200ms
+    # gesture: grab_window BEGIN at pinch_midpoint hitting UV (0.5, 0.5)
+    # which is dead-centre of the panel.
+    gesture name=grab_window type=BEGIN pinch_midpoint=(0.0, 0.6, -0.9) at_ts=500ms
+    # UPDATEs: hand drifts +0.10 m on engine y (= +0.10 m on world x — see
+    # the axis-swap comment in hand_input.c WINDOW_MOVE handler).
+    gesture name=grab_window type=UPDATE delta=(0.0, 0.05, 0.0) at_ts=600ms
+    gesture name=grab_window type=UPDATE delta=(0.0, 0.05, 0.0) at_ts=700ms
+    gesture name=grab_window type=END at_ts=900ms
+
+expectations:
+  # MOVE path translated the panel.  Default move_gain is 3.0, so a 0.10 m
+  # raw hand-y delta yields +0.30 m on world x.  Tolerance 1 cm covers
+  # spring-target rounding.
+  - kind: view-world-position
+    name: test_panel
+    at_ts: 1500ms
+    expected_xyz: (0.30, 0.6, -1.0)
+    tolerance_m: 0.01
+  # No configure was sent — RESIZE must NOT have dispatched.
+  - kind: not-event
+    name: wlr_xdg_toplevel_set_size
+    target: test_panel
+    window_ts: [400ms, 1500ms]
+  # Anchor remains unset — no plane was advertised so try_snap clears it.
+  - kind: view-has-anchor
+    name: test_panel
+    at_ts: 1500ms
+    expected: false
+
+teardown:
+  - pkill -9 wxrd || true
+  - pkill -9 monado-service || true

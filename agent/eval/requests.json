@@ -1,0 +1,22 @@
+[
+  {"id": 1, "text": "put a note on the desk that says buy milk", "expect": "table"},
+  {"id": 2, "text": "pin a reminder to the wall in front of me: call mom", "expect": "wall"},
+  {"id": 3, "text": "open safari on the wall", "expect": "wall"},
+  {"id": 4, "text": "put a note on the table with today's three tasks", "expect": "table"},
+  {"id": 5, "text": "stick a label on the wall that says charging station", "expect": "wall"},
+  {"id": 6, "text": "open the terminal on my desk", "expect": "table"},
+  {"id": 7, "text": "leave a note where I'm looking that says water the plant", "expect": "gaze"},
+  {"id": 8, "text": "put a shopping list on the wall", "expect": "wall"},
+  {"id": 9, "text": "open notes on the desk", "expect": "table"},
+  {"id": 10, "text": "put a note in front of me that says 7pm checkpoint", "expect": "front"},
+  {"id": 11, "text": "put the wifi password on the wall: guest1234", "expect": "wall"},
+  {"id": 12, "text": "leave a note on the table that says return the library book", "expect": "table"},
+  {"id": 13, "text": "open calendar where I'm looking", "expect": "gaze"},
+  {"id": 14, "text": "put a note on the wall that says do not disturb", "expect": "wall"},
+  {"id": 15, "text": "put a note on my desk: email the TA", "expect": "table"},
+  {"id": 16, "text": "open messages to my left", "expect": "front"},
+  {"id": 17, "text": "put a note on the wall behind the monitor that says standup at 10", "expect": "wall"},
+  {"id": 18, "text": "leave a sticky note on the table that says keys are in the drawer", "expect": "table"},
+  {"id": 19, "text": "open safari where I'm looking", "expect": "gaze"},
+  {"id": 20, "text": "put a note on the wall that says rent due friday", "expect": "wall"}
+]
