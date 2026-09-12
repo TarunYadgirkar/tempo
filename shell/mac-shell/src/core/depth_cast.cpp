@@ -11,9 +11,15 @@ namespace {
 // Neighbour offset the normal's finite differences are taken over. Two pixels
 // rides over single-sample LiDAR noise without smearing across a surface edge.
 constexpr int NORMAL_STEP_PX = 2;
-// A neighbour further than this from the centre sample belongs to a different
-// surface, not to a slope on this one.
-constexpr float NORMAL_DISCONTINUITY_M = 0.10f;
+// How far a neighbour may sit from the centre sample before it counts as a
+// different surface rather than a slope on this one. A fixed metric budget
+// cannot work: NORMAL_STEP_PX subtends a fixed ANGLE, so the depth step a
+// continuous surface produces grows with distance and with how steeply the
+// surface is tilted away. The budget is therefore d * (k / f) — the lateral
+// span those pixels cover at that range — times the steepest slope still
+// treated as continuous, with a floor for LiDAR noise at close range.
+constexpr float NORMAL_MAX_SLOPE = 6.0f;  // ~80 deg off perpendicular
+constexpr float NORMAL_DISCONTINUITY_FLOOR_M = 0.03f;
 // Bisection budget for the behind-the-surface crossing; 16 halvings take a
 // 1 cm bracket under 0.2 micrometres.
 constexpr int CROSSING_REFINE_STEPS = 16;
@@ -105,11 +111,18 @@ bool estimate_normal(const depth_cast_input &in, const cam_basis &b, float u,
     float center[3];
     unproject(in, b, u, v, d_center, center);
 
+    // Focal length expressed in DEPTH-map pixels (the intrinsics are in the
+    // larger colour image's pixels), so k / f_px is the angle the step spans.
+    float f_px = std::fmin(in.intr.fx * b.sx, in.intr.fy * b.sy);
+    float tol = NORMAL_DISCONTINUITY_FLOOR_M;
+    if (f_px > 1e-3f)
+        tol = std::fmax(tol, NORMAL_MAX_SLOPE * d_center * k / f_px);
+
     auto neighbour = [&](float du, float dv, float p[3]) {
         float d;
         if (!sample(in, u + du, v + dv, d))
             return false;
-        if (std::fabs(d - d_center) > NORMAL_DISCONTINUITY_M)
+        if (std::fabs(d - d_center) > tol)
             return false;
         unproject(in, b, u + du, v + dv, d, p);
         return true;

@@ -102,7 +102,9 @@ static std::vector<uint8_t> plane_packet(uint64_t ts_ns, float cy) {
 }
 
 static constexpr int DW = 48, DH = 36;
-static constexpr float DFX = 40.0f, DFY = 40.0f;
+// Half-FOV tangents 24/20 across and 18/20 down — wide enough that a ray
+// 39 deg below the axis still lands inside the depth map.
+static constexpr float DFX = 20.0f, DFY = 20.0f;
 static constexpr float FLOOR_Y = -0.8f, WALL_Z = -2.0f;
 
 static std::vector<uint8_t> intrinsics_packet(uint64_t ts_ns) {

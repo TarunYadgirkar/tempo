@@ -126,3 +126,44 @@ def gaze_hit(head: dict, planes: list[dict], kinds: set[str]) -> Vec3 | None:
     n = best[2]["normal"]
     toward_viewer = 1.0 if dot(n, (origin[0] - best[1][0], origin[1] - best[1][1], origin[2] - best[1][2])) > 0 else -1.0
     return add(best[1], scale(n, 0.05 * toward_viewer))
+
+
+def quat_from_axes(right: Sequence[float], up: Sequence[float], back: Sequence[float]) -> Quat:
+    """xyzw quaternion whose columns are the given orthonormal right/up/back axes (panel faces -back)."""
+    m00, m01, m02 = right[0], up[0], back[0]
+    m10, m11, m12 = right[1], up[1], back[1]
+    m20, m21, m22 = right[2], up[2], back[2]
+    tr = m00 + m11 + m22
+    if tr > 0:
+        s = math.sqrt(tr + 1.0) * 2
+        return ((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s)
+    if m00 > m11 and m00 > m22:
+        s = math.sqrt(1.0 + m00 - m11 - m22) * 2
+        return (0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s)
+    if m11 > m22:
+        s = math.sqrt(1.0 + m11 - m00 - m22) * 2
+        return ((m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s)
+    s = math.sqrt(1.0 + m22 - m00 - m11) * 2
+    return ((m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s)
+
+
+def surface_pose(hit: Sequence[float], normal: Sequence[float], viewer: Sequence[float], lift_m: float = 0.04) -> tuple[Vec3, Quat]:
+    """Pose for a panel sitting on a surface: pushed off it by lift_m, facing the viewer side.
+
+    Walls: panel is upright, its face along the wall normal. Floors and tables: panel lies flat
+    with its top edge pointing away from the viewer, so text reads correctly from where they stand.
+    """
+    n = normalize(normal)
+    to_viewer = sub(viewer, hit)
+    if dot(n, to_viewer) < 0:
+        n = scale(n, -1.0)
+    pos = add(hit, scale(n, lift_m))
+    world_up = (0.0, 1.0, 0.0)
+    if abs(n[1]) > 0.8:
+        flat_to_viewer = normalize((to_viewer[0], 0.0, to_viewer[2]))
+        up = scale(flat_to_viewer, -1.0)
+        right = normalize(cross(up, n))
+        return pos, quat_from_axes(right, up, n)
+    right = normalize(cross(world_up, n))
+    up = normalize(cross(n, right))
+    return pos, quat_from_axes(right, up, n)

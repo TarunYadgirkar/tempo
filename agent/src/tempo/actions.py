@@ -184,7 +184,29 @@ class Executor:
             case _:
                 return spatial.in_front(head, 0.9, right=side)
 
+    SURFACE_WHERE = {"on_table": "horizontal", "on_wall": "vertical", "where_looking": None, "where_pointing": None}
+
+    def _surface_hit(self, where: str) -> dict | None:
+        """Depth-map hit for surface placements, when the shell can cast and the hit kind matches."""
+        if where not in self.SURFACE_WHERE:
+            return None
+        if where == "where_pointing" and self.snap.aim.get("ray_origin"):
+            hit = self.shell.cast(self.snap.aim["ray_origin"], self.snap.aim["ray_dir"])
+        else:
+            hit = self.shell.cast()
+        if not hit or not hit.get("hit"):
+            return None
+        want = self.SURFACE_WHERE[where]
+        if want and hit.get("kind") != want:
+            return None
+        return hit
+
     def _place(self, handle: int, where: str) -> None:
+        hit = self._surface_hit(where)
+        if hit:
+            pos, quat = spatial.surface_pose(hit["hit"], hit["normal"], self.snap.head["scene_pos"])
+            if self.shell.pose(handle, pos, quat):
+                return
         self.shell.move(handle, self._target(where))
         if where == "on_table":
             self.shell.anchor(handle, "closest-horizontal")

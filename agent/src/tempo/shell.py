@@ -6,7 +6,7 @@ import os
 import socket
 import time
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 
 class ShellError(RuntimeError):
@@ -81,6 +81,22 @@ class Shell:
     def note(self, title: str, body: str, accent: bool = False) -> int:
         payload = json.dumps({"title": title, "body": body, "accent": accent})
         return int(self.send(f"note {payload}").kv()["handle"])
+
+    def cast(self, origin: Sequence[float] | None = None, direction: Sequence[float] | None = None) -> dict[str, Any] | None:
+        """Surface hit along a ray (default: head forward). None when the shell predates the verb."""
+        line = "cast" if origin is None else "cast " + " ".join(f"{v:.4f}" for v in (*origin, *direction))
+        try:
+            return self.send(line).json()
+        except ShellError:
+            return None
+
+    def pose(self, handle: int, pos: Sequence[float], quat: Sequence[float]) -> bool:
+        try:
+            self.send(f"pose {handle} " + " ".join(f"{v:.5f}" for v in (*pos, *quat)))
+            return True
+        except ShellError:
+            self.move(handle, (pos[0], pos[1], pos[2]))
+            return False
 
     def aim(self) -> dict[str, Any]:
         return self.send("aim").json()
