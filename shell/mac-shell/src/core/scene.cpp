@@ -143,8 +143,9 @@ bool panel_hit_px(const panel &p, const float head[3], const float point[3],
 // behind it. False when the ray meets nothing in front of the user.
 bool ray_plane_hit(const anchor_env &env, const sb_plane_t *planes,
                    int n_planes, const float origin[3], const float dir[3],
-                   float out_hit[3]) {
+                   float out_hit[3], float *out_normal = nullptr) {
     float best_t = 0.0f, best_any_t = 0.0f;
+    float best_n[3] = {0.0f, 1.0f, 0.0f}, best_any_n[3] = {0.0f, 1.0f, 0.0f};
     bool have = false, have_any = false;
     for (int i = 0; i < n_planes; i++) {
         if (planes[i].is_removed)
@@ -161,6 +162,7 @@ bool ray_plane_hit(const anchor_env &env, const sb_plane_t *planes,
             continue;
         if (!have_any || t < best_any_t) {
             best_any_t = t;
+            v3copy(normal, best_any_n);
             have_any = true;
         }
         float hit[3] = {origin[0] + t * dir[0], origin[1] + t * dir[1],
@@ -172,6 +174,7 @@ bool ray_plane_hit(const anchor_env &env, const sb_plane_t *planes,
             continue;
         if (!have || t < best_t) {
             best_t = t;
+            v3copy(normal, best_n);
             have = true;
         }
     }
@@ -180,6 +183,16 @@ bool ray_plane_hit(const anchor_env &env, const sb_plane_t *planes,
     float t = have ? best_t : best_any_t;
     for (int i = 0; i < 3; i++)
         out_hit[i] = origin[i] + t * dir[i];
+    if (out_normal) {
+        v3copy(have ? best_n : best_any_n, out_normal);
+        // plane_to_scene_basis hands back ARKit's own normal, which may point
+        // away from the caster; `cast` answers with the face the ray met.
+        float back[3];
+        v3sub(origin, out_hit, back);
+        if (v3dot(out_normal, back) < 0.0f)
+            for (int i = 0; i < 3; i++)
+                out_normal[i] = -out_normal[i];
+    }
     return true;
 }
 
@@ -364,6 +377,10 @@ void scene::tick_locked(float dt) {
             if (sb_get_hand(receiver_, slot, &hand))
                 ingest_hand(slot, hand);
         }
+
+        // After update_head, so the pose ring already carries the sample the
+        // depth frame's timestamp interpolates against.
+        ingest_depth();
     }
 
     for (int slot = 0; slot < 2; slot++) {
@@ -828,6 +845,32 @@ void scene::ingest_planes(const sb_plane_t *planes, int n) {
         planes_[kept++] = pl;
     }
     n_planes_ = kept;
+}
+
+void scene::ingest_depth() {
+    sb_intrinsics_t intr;
+    if (sb_get_latest_intrinsics(receiver_, &intr)) {
+        latest_depth_.intr = intr;
+        latest_depth_.have_intrinsics = true;
+    }
+    sb_depth_t d;
+    if (!sb_get_latest_depth(receiver_, &d))
+        return;
+    if (d.depth && d.width > 0 && d.height > 0 &&
+        d.depth_count == d.width * d.height) {
+        latest_depth_.depth.assign(d.depth, d.depth + d.depth_count);
+        latest_depth_.width = d.width;
+        latest_depth_.height = d.height;
+        latest_depth_.ts_ns = d.timestamp_ns;
+        latest_depth_.version++;
+        // The map is a snapshot of the room from where the camera was when it
+        // was exposed, not from where the head is now; casting against it from
+        // the newest pose would shear the whole room on a head turn.
+        latest_depth_.have_pose = head_pose_at_locked(
+            d.timestamp_ns, latest_depth_.cam_pos, latest_depth_.cam_quat,
+            nullptr);
+    }
+    sb_free_depth(&d);
 }
 
 void scene::ingest_hand(int slot, const sb_hand_t &hand) {
@@ -1661,6 +1704,69 @@ std::string scene::aim_json() const {
     return s + "}";
 }
 
+bool scene::snapshot_depth(uint64_t have_version, depth_snapshot &out) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (latest_depth_.version == 0 || latest_depth_.version == have_version)
+        return false;
+    out = latest_depth_;
+    return true;
+}
+
+std::string scene::cast_json(const float *origin_in, const float *dir_in) const {
+    static const char *NONE =
+        "{\"hit\":null,\"distance_m\":null,\"normal\":null,\"kind\":null,"
+        "\"source\":\"none\"}";
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    float origin[3], dir[3];
+    if (origin_in && dir_in) {
+        v3copy(origin_in, origin);
+        v3copy(dir_in, dir);
+    } else {
+        float head_quat[4];
+        if (!scene_head_quat(head_quat))
+            return NONE;  // no pose yet: there is no "forward" to cast along
+        v3copy(env_.head_pos, origin);
+        const float fwd_local[3] = {0.0f, 0.0f, -1.0f};
+        quat_rotate_vec(head_quat, fwd_local, dir);
+    }
+    if (!v3finite(origin) || !v3finite(dir) || v3normalize(dir) <= 1e-6f)
+        return NONE;
+
+    auto reply = [&](const float hit[3], float distance, const float normal[3],
+                     const char *source) {
+        std::string s = "{\"hit\":" + vec_json(hit, 3);
+        s += ",\"distance_m\":" + fnum((double)distance);
+        s += ",\"normal\":" + vec_json(normal, 3);
+        s += std::string(",\"kind\":\"") + surface_kind(normal) + "\"";
+        s += std::string(",\"source\":\"") + source + "\"}";
+        return s;
+    };
+
+    if (latest_depth_.have_pose && latest_depth_.have_intrinsics &&
+        !latest_depth_.depth.empty()) {
+        depth_cast_input in;
+        in.depth = latest_depth_.depth.data();
+        in.width = (int)latest_depth_.width;
+        in.height = (int)latest_depth_.height;
+        in.intr = latest_depth_.intr;
+        v3copy(latest_depth_.cam_pos, in.cam_pos);
+        for (int i = 0; i < 4; i++)
+            in.cam_quat[i] = latest_depth_.cam_quat[i];
+        depth_cast_result r;
+        if (depth_cast_ray(in, origin, dir, r))
+            return reply(r.point, r.distance_m, r.normal, "depth");
+    }
+
+    float hit[3], normal[3];
+    if (ray_plane_hit(env_, planes_, n_planes_, origin, dir, hit, normal)) {
+        float rel[3];
+        v3sub(hit, origin, rel);
+        return reply(hit, v3length(rel), normal, "plane");
+    }
+    return NONE;
+}
+
 // ------------------------------------------------------------------
 // layouts
 // ------------------------------------------------------------------
@@ -1807,6 +1913,11 @@ bool scene::head_pose(float out_pos[3], float out_quat[4]) const {
 bool scene::head_pose_at(uint64_t ts_ns, float out_pos[3], float out_quat[4],
                          float *out_lag_ms) const {
     std::lock_guard<std::mutex> lock(mutex_);
+    return head_pose_at_locked(ts_ns, out_pos, out_quat, out_lag_ms);
+}
+
+bool scene::head_pose_at_locked(uint64_t ts_ns, float out_pos[3],
+                                float out_quat[4], float *out_lag_ms) const {
     if (out_lag_ms)
         *out_lag_ms = 0.0f;
     if (head_ring_count_ == 0)

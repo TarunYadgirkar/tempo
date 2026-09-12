@@ -630,6 +630,10 @@ void control_server::on_line(conn &c, const char *line) {
         queue_ok_str(scene_.aim_json());
         return;
     }
+    if (is_bare_verb("cast")) {
+        queue_ok_str(scene_.cast_json(nullptr, nullptr));
+        return;
+    }
     if (is_bare_verb("stats")) {
         if (stats_)
             queue_ok_str(stats_());
@@ -655,6 +659,17 @@ void control_server::on_line(conn &c, const char *line) {
         return true;
     };
     std::string arg;
+    if (sub_verb("cast", arg)) {
+        float o[3], d[3];
+        char tail;
+        if (std::sscanf(arg.c_str(), "%f %f %f %f %f %f %c", &o[0], &o[1],
+                        &o[2], &d[0], &d[1], &d[2], &tail) != 6) {
+            queue_err("parse_error", line);
+            return;
+        }
+        queue_ok_str(scene_.cast_json(o, d));
+        return;
+    }
     if (sub_verb("depth-occlusion", arg)) {
         if (arg == "off" || arg == "0")
             scene_.set_depth_occlusion_mode(0);

@@ -21,6 +21,7 @@
 #include "spatial_bridge.h"
 
 #include "core/anchor_math.h"
+#include "core/depth_cast.h"
 #include "core/hud_state.h"
 #include "core/layout_store.h"
 #include "ui/keyboard_overlay.h"
@@ -221,6 +222,13 @@ class scene {
     // Every vector is null when no confident hand is visible.
     std::string aim_json() const;
 
+    // `cast` verb: where an arbitrary ray meets the room. `origin` and `dir`
+    // are scene-frame metres; pass nullptr for both to cast the head's
+    // forward ray. The LiDAR depth map answers when one is available (it sees
+    // the desk ARKit's plane list missed); the plane list is the fallback,
+    // and `source` says which — "depth", "plane", or "none" with nulls.
+    std::string cast_json(const float *origin, const float *dir) const;
+
     // Event lines queued for `subscribe` streams ("event ..." payloads).
     std::vector<std::string> drain_events();
 
@@ -283,6 +291,28 @@ class scene {
     using have_version_fn = std::function<uint64_t(uint64_t)>;
     std::vector<render_panel> snapshot_render_panels(
         const have_version_fn &have_version = {});
+    // Latest LiDAR depth map with the intrinsics and SCENE-frame camera pose
+    // it was captured under. The scene is the SINGLE consumer of
+    // sb_get_latest_depth — that call transfers ownership of the buffer, so a
+    // second caller would starve the first; the renderer's occlusion texture
+    // comes from here instead.
+    struct depth_snapshot {
+        uint64_t version = 0;  // 0 = no depth map has ever arrived
+        uint64_t ts_ns = 0;
+        uint32_t width = 0, height = 0;
+        std::vector<float> depth;  // row-major metres, 0 = no reading
+        sb_intrinsics_t intr{};
+        bool have_intrinsics = false;
+        // Scene-frame head/camera pose interpolated to ts_ns. False when no
+        // world origin was captured, which makes the map unusable for casting.
+        bool have_pose = false;
+        float cam_pos[3] = {0.0f, 0.0f, 0.0f};
+        float cam_quat[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    };
+    // False when no depth map has arrived, or when `have_version` already
+    // names the one the scene holds (the renderer skips the upload).
+    bool snapshot_depth(uint64_t have_version, depth_snapshot &out) const;
+
     keyboard_render_state snapshot_keyboard(uint64_t have_version = 0) const;
     launcher_render_state snapshot_launcher(uint64_t have_version = 0) const;
 
@@ -327,6 +357,12 @@ class scene {
     void hand_to_scene(sb_hand_t &hand) const;
     // Copies planes in, dropping any with non-finite geometry. mutex_ held.
     void ingest_planes(const sb_plane_t *planes, int n);
+    // Drains sb_get_latest_depth + sb_get_latest_intrinsics into
+    // latest_depth_ and stamps it with the pose at its timestamp. mutex_ held.
+    void ingest_depth();
+    // mutex_ held body of head_pose_at (ingest_depth already holds the lock).
+    bool head_pose_at_locked(uint64_t ts_ns, float out_pos[3],
+                             float out_quat[4], float *out_lag_ms) const;
     // Adopts a hand into slot if every joint is finite. mutex_ held.
     void ingest_hand(int slot, const sb_hand_t &hand);
     uint64_t spawn_panel_impl(const std::string &app_id,
@@ -392,6 +428,8 @@ class scene {
 
     sb_plane_t planes_[SCENE_MAX_PLANES] = {};
     int n_planes_ = 0;
+
+    depth_snapshot latest_depth_;
 
     ge_hand_t hands_[2] = {};
     bool launcher_hand_left_ = false;

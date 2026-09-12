@@ -119,6 +119,7 @@ set(RADIAL_MENU_SRC ${SPATULA_ROOT}/spatial-shell/radial-menu)
 
 add_library(scene_core STATIC
     src/core/anchor_math.cpp
+    src/core/depth_cast.cpp
     src/core/json_lite.cpp
     src/core/layout_store.cpp
     src/core/scene.cpp
@@ -304,6 +305,11 @@ add_executable(test_depth_math tests/test_depth_math.cpp)
 target_link_libraries(test_depth_math PRIVATE scene_core)
 add_test(NAME depth_math COMMAND test_depth_math)
 
+add_executable(test_depth_cast tests/test_depth_cast.cpp)
+target_link_libraries(test_depth_cast PRIVATE scene_core)
+target_compile_options(test_depth_cast PRIVATE -Wall -Wextra)
+add_test(NAME depth_cast COMMAND test_depth_cast)
+
 add_executable(test_placement tests/test_placement.cpp)
 target_link_libraries(test_placement PRIVATE scene_core)
 add_test(NAME placement COMMAND test_placement)
@@ -346,6 +352,14 @@ target_compile_definitions(test_hack_verbs_e2e PRIVATE
 add_dependencies(test_hack_verbs_e2e mac-shell)
 add_test(NAME hack_verbs_e2e COMMAND test_hack_verbs_e2e)
 set_tests_properties(hack_verbs_e2e PROPERTIES TIMEOUT 60)
+
+add_executable(test_cast_e2e tests/test_cast_e2e.cpp)
+target_compile_options(test_cast_e2e PRIVATE -Wall -Wextra)
+target_compile_definitions(test_cast_e2e PRIVATE
+    MAC_SHELL_BIN="$<TARGET_FILE:mac-shell>")
+add_dependencies(test_cast_e2e mac-shell)
+add_test(NAME cast_e2e COMMAND test_cast_e2e)
+set_tests_properties(cast_e2e PROPERTIES TIMEOUT 120)
 
 add_executable(test_port_retry_e2e tests/test_port_retry_e2e.cpp)
 target_compile_definitions(test_port_retry_e2e PRIVATE

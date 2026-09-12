@@ -229,6 +229,7 @@ void bonjour_browse_reply(DNSServiceRef, DNSServiceFlags flags, uint32_t,
                             bytesPerRow:4];
     }
     _have_depth_map = false;
+    _depth_version = 0;
     _have_intrinsics = false;
     _orient_bucket = 0;
     std::memset(&_occl, 0, sizeof(_occl));
@@ -516,9 +517,13 @@ void bonjour_browse_reply(DNSServiceRef, DNSServiceFlags flags, uint32_t,
         _intrinsics = intr;
         _have_intrinsics = true;
     }
-    sb_depth_t depth;
-    if (!sb_get_latest_depth(_s->receiver, &depth))
+    // The scene owns the drain (sb_get_latest_depth transfers the buffer, so
+    // only one consumer can have it) and stamps each map with the pose it was
+    // captured at, which is what the `cast` verb needs.
+    mac_shell::scene::depth_snapshot depth;
+    if (!_s->world->snapshot_depth(_depth_version, depth))
         return;
+    _depth_version = depth.version;
     __strong id<MTLTexture> &slot = _depth_ring[_ring_index];
     if (!slot || slot.width != depth.width || slot.height != depth.height) {
         MTLTextureDescriptor *td = [MTLTextureDescriptor
@@ -532,9 +537,9 @@ void bonjour_browse_reply(DNSServiceRef, DNSServiceFlags flags, uint32_t,
     // Temporal EMA: blends LiDAR noise out of static surfaces (reduces
     // occlusion-edge crawl). Invalid readings (0) pass through as invalid so
     // stale depth never lingers where the sensor lost the surface.
-    const size_t count = (size_t)depth.width * depth.height;
+    const size_t count = depth.depth.size();
     if (_depth_ema.size() != count) {
-        _depth_ema.assign(depth.depth, depth.depth + count);
+        _depth_ema = depth.depth;
     } else {
         constexpr float K = 0.6f;  // weight of the new frame
         for (size_t i = 0; i < count; i++) {
@@ -552,7 +557,6 @@ void bonjour_browse_reply(DNSServiceRef, DNSServiceFlags flags, uint32_t,
             bytesPerRow:depth.width * 4];
     _depth_map_tex = slot;
     _have_depth_map = true;
-    sb_free_depth(&depth);
 }
 
 - (void)releaseFrameObjects {

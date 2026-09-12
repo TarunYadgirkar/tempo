@@ -527,6 +527,8 @@ void stop_app_loop();
     mac_shell::occlusion_uniforms _occl;
     // Temporal EMA of the LiDAR depth map (invalid readings stay invalid).
     std::vector<float> _depth_ema;
+    // scene::depth_snapshot version already uploaded; 0 = none.
+    uint64_t _depth_version;
     // HUD overlays: welcome/error card, onboarding, cheat sheet, toast.
     mac_shell::overlay_anim _welcome_anim;
     mac_shell::overlay_anim _onboard_anim;

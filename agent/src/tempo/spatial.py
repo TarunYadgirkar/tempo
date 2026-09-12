@@ -47,8 +47,13 @@ def head_forward(head: dict) -> Vec3:
     return normalize((fwd[0], 0.0, fwd[2])) if abs(fwd[1]) > 0.95 else normalize(fwd)
 
 
+def cross(a: Sequence[float], b: Sequence[float]) -> Vec3:
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
 def head_right(head: dict) -> Vec3:
-    return normalize(rotate(head["scene_rot"], (1.0, 0.0, 0.0)))
+    """Right is forward x world-up, so a portrait phone's rolled camera axes never leak in."""
+    return normalize(cross(head_forward(head), (0.0, 1.0, 0.0)))
 
 
 def in_front(head: dict, distance: float = 0.9, right: float = 0.0, up: float = 0.0) -> Vec3:
