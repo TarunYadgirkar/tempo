@@ -120,3 +120,95 @@ offset origin, plus the no-hit paths and the floor-height search; the `pose`,
 `cast_e2e`) drives all four over a real control socket against two synthesised
 replay sessions — planes only (`source=plane`) and planes plus 0x0A/0x0B LiDAR
 (`source=depth`).
+
+## Hand tracking moved to the Mac
+
+The phone's Apple Vision hand skeleton is the weakest link in the gesture
+stack: it drops the hand on rotation and its fingertips wander by centimetres,
+so pinch, point and fist fire late or not at all. These two verbs let a process
+on the Mac do the tracking instead (MediaPipe Hand Landmarker over the streamed
+camera frames, fingertip range from the LiDAR depth map — `hands/`) and push
+the result back into the SAME joints the `0x05` packet fills, so every gesture
+already built on them benefits without knowing the source changed.
+
+- **`frame-export on <dir> | off | status`** — publishes the live camera frame
+  and everything needed to interpret it into `<dir>`, at up to 15 Hz:
+  `latest.jpg` (the decoded RGBA re-encoded), `latest.depth` (raw float32
+  metres, row-major, `0` = no reading) and `latest.json`. Each is written to a
+  temp file in the same directory and `rename()`d into place; the sidecar is
+  renamed LAST and carries the frame timestamp, so a reader that polls it never
+  sees a half-written image. Sidecar shape:
+  `{"t_ns":..,"seq":..,"image":{"width":..,"height":..,"file":"latest.jpg"},`
+  `"head":{"frame":"scene","pos":[x,y,z],"quat":[x,y,z,w]}|null,`
+  `"intrinsics":{"fx","fy","cx","cy","image_width","image_height"}|null,`
+  `"depth":{"width":..,"height":..,"file":"latest.depth","format":"float32","t_ns":..}|null}`.
+  `head` is `scene::head_pose_at(frame.timestamp)`, not the newest pose — the
+  landmarks have to land in the frame the camera saw, not the one the head has
+  since turned to. The intrinsics are in ARKit CAPTURE pixels, which are larger
+  than the JPEG's; a consumer rescales by `image_width/width`. All three of
+  `head`, `intrinsics` and `depth` can be null, and a run can legitimately have
+  colour and nothing else. Replies `ok on dir=<path> frames=<n> hz=15` /
+  `ok off frames=<n>`. Like `screenshot`, the target must resolve inside
+  `$TMPDIR` or `$HOME` (`err outside_allowed_roots`, `err not_absolute`,
+  `err mkdir_failed`) — it is a file-write primitive on an agent-reachable
+  socket. The renderer feeds the exporter the frame it already decoded;
+  headless, `main.cpp`'s tick loop pulls one itself, but only while export is
+  on (`sb_get_latest_frame` transfers ownership, so draining frames nobody
+  looks at would starve the renderer).
+  Files: `mac-shell/src/platform/frame_export.{h,mm}` (new),
+  `mac-shell/src/platform/main.cpp`, `mac-shell/src/platform/renderer.mm`,
+  `mac-shell/src/platform/control_server.{h,cpp}` (one dispatch block + a
+  handler seam, so the verb links without the renderer sources).
+- **`hands-inject <json>`** —
+  `{"t":ms,"hands":[{"chirality":"left|right","confidence":0..1,"joints":[[x,y,z] x21]}]}`,
+  joints in SCENE-frame metres in MediaPipe landmark order. Replaces the
+  phone's hands for the gesture engine and the skeleton overlay while the
+  injection is fresher than 150 ms; past that the phone's hands come straight
+  back, so a tracker that dies degrades instead of freezing the user's hands in
+  mid-air. `err bad_json <why>` otherwise.
+  Storage is per chirality rather than per message, because the vendored wire
+  layer caps a request line at `CTL_CONN_INPUT_MAX` (~1.1 kB) and two hands of
+  21 joints do not fit in one: each message REPLACES the chiralities it
+  carries and leaves the other to age out on its own clock, and an empty
+  `hands` array is the explicit "no hands in view" that retracts both. Left
+  takes scene slot 0 and right slot 1 — fixed, unlike the phone's
+  first-seen-order slots.
+- **`hands status`** now replies `ok overlay=on|off source=phone|mac age_ms=<n>`
+  (`age_ms` is the age of the last injection). **`hands dump`** replies
+  `ok {"source":"phone|mac","age_ms":..,"frame":"scene","hands":[{"slot":n,`
+  `"age_s":..,"joints":[[x,y,z,confidence] x21]}]}` — the joints the gesture
+  engine is seeing right now, in MediaPipe order so an evaluation harness can
+  line the two sources up landmark by landmark without a second table.
+
+**Joint order.** MediaPipe's 21 landmarks and `SB_JOINT_*` (what the `0x05`
+packet packs, and what `GE_JOINT_*` mirrors) enumerate the same skeleton in the
+same sequence — wrist, thumb CMC/MCP/IP/TIP, then index/middle/ring/pinky
+MCP/PIP/DIP/TIP — so the mapping is the identity. It is still written out as a
+table in `core/hand_inject.cpp` and asserted as a bijection by a test, because
+an agreement that holds by coincidence stops holding silently.
+
+Supporting changes: `scene::ingest_hand` takes an `already_scene` flag (mac
+joints arrive in the scene frame and must skip the ARKit-world rewrite), and
+`scene::tick_locked` consults the injection store before draining
+`sb_get_hand` — never both in one tick, since alternating sources would make
+every gesture threshold chatter.
+Files: `mac-shell/src/core/hand_inject.{h,cpp}` (new),
+`mac-shell/src/core/scene.{h,cpp}`, `mac-shell/CMakeLists.txt`.
+
+Tests: `mac-shell/tests/test_hand_inject.cpp` (ctest `hand_inject`) pins the
+landmark bijection, the depth unprojection (including that a downscaled image
+unprojects to the same point as the full-resolution one, which is the mistake
+that would put every landmark at several times its true angle off-axis), the
+camera→scene transform, the payload parse and its refusals, the freshness
+window, and the scene-level takeover and fallback;
+`mac-shell/tests/test_hands_e2e.cpp` (ctest `hands_e2e`) drives both verbs over
+a real control socket against a synthesised session carrying pose, intrinsics,
+a chunked JPEG frame and a chunked LiDAR depth map — checking the sidecar's
+contents, that `latest.depth` reads back as exactly the metres the wire
+carried, the containment refusals, that the export keeps publishing rather than
+firing once, and that the mac takeover expires back to the phone.
+
+The tracker itself lives in `hands/` (its own uv project, Python 3.12,
+mediapipe 0.10.21) with `uv run hands track` and `uv run hands eval`; see
+`hands/README.md`. `hands/tests/` re-asserts the same unprojection numbers in
+Python, so the two halves of that math keep agreeing.

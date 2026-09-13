@@ -1,0 +1,26 @@
+[project]
+name = "hands"
+version = "0.1.0"
+description = "Mac-side MediaPipe hand tracking for the Spatula spatial shell"
+readme = "README.md"
+authors = [
+    { name = "Tarun Yadgirkar", email = "tyadgirkar@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mediapipe==0.10.21",
+    "numpy>=1.26.4",
+    "pillow>=12.3.0",
+]
+
+[project.scripts]
+hands = "hands.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

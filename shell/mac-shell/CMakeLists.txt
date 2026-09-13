@@ -321,6 +321,21 @@ target_link_libraries(test_keyboard PRIVATE scene_core)
 add_test(NAME keyboard COMMAND test_keyboard)
 set_tests_properties(keyboard PROPERTIES TIMEOUT 60)
 
+add_executable(test_hand_inject tests/test_hand_inject.cpp)
+target_link_libraries(test_hand_inject PRIVATE scene_core)
+target_compile_options(test_hand_inject PRIVATE -Wall -Wextra)
+add_test(NAME hand_inject COMMAND test_hand_inject)
+
+add_executable(test_hands_e2e tests/test_hands_e2e.cpp)
+target_include_directories(test_hands_e2e PRIVATE
+    ${SPATULA_ROOT}/bridge-receiver/tests)
+target_compile_options(test_hands_e2e PRIVATE -Wall -Wextra)
+target_compile_definitions(test_hands_e2e PRIVATE
+    MAC_SHELL_BIN="$<TARGET_FILE:mac-shell>")
+add_dependencies(test_hands_e2e mac-shell)
+add_test(NAME hands_e2e COMMAND test_hands_e2e)
+set_tests_properties(hands_e2e PROPERTIES TIMEOUT 120)
+
 add_executable(test_note_layout tests/test_note_layout.cpp)
 target_link_libraries(test_note_layout PRIVATE scene_core)
 target_compile_options(test_note_layout PRIVATE -Wall -Wextra)

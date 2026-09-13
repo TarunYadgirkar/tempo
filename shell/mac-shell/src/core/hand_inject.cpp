@@ -184,19 +184,48 @@ bool parse_hands_inject(const std::string &json, injected_hands &out,
 }
 
 void hand_inject_store::set(const injected_hands &h) {
-    hands_ = h;
-    received_ms_ = hand_inject_now_ms();
+    const uint64_t now = hand_inject_now_ms();
     ever_ = true;
+    if (h.count == 0) {
+        // "no hands in view this frame" — retract both rather than letting
+        // the last pose linger for another 150 ms.
+        received_ms_[LEFT] = 0;
+        received_ms_[RIGHT] = 0;
+        return;
+    }
+    for (int i = 0; i < h.count; i++) {
+        const int slot = h.is_left[i] ? LEFT : RIGHT;
+        hands_[slot] = h.hands[i];
+        hands_[slot].hand_index = (uint8_t)slot;
+        received_ms_[slot] = now;
+    }
+}
+
+bool hand_inject_store::slot_fresh(int slot, uint64_t now_ms) const {
+    if (slot < 0 || slot > 1 || received_ms_[slot] == 0)
+        return false;
+    return now_ms <= received_ms_[slot] ||
+           now_ms - received_ms_[slot] < HAND_INJECT_FRESH_MS;
 }
 
 uint64_t hand_inject_store::age_ms(uint64_t now_ms) const {
-    if (!ever_ || now_ms <= received_ms_)
-        return 0;
-    return now_ms - received_ms_;
+    uint64_t best = 0;
+    bool any = false;
+    for (int slot = 0; slot < 2; slot++) {
+        if (received_ms_[slot] == 0)
+            continue;
+        const uint64_t age =
+            now_ms <= received_ms_[slot] ? 0 : now_ms - received_ms_[slot];
+        if (!any || age < best) {
+            best = age;
+            any = true;
+        }
+    }
+    return best;
 }
 
 bool hand_inject_store::fresh(uint64_t now_ms) const {
-    return ever_ && age_ms(now_ms) < HAND_INJECT_FRESH_MS;
+    return slot_fresh(LEFT, now_ms) || slot_fresh(RIGHT, now_ms);
 }
 
 }  // namespace mac_shell

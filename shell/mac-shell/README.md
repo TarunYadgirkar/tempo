@@ -99,7 +99,16 @@ extensions: `launch-app <target>`, `permissions`, `stats`, `gather-panels`,
 21-joint skeleton with thin translucent bones and smaller joints. Cyan/yellow
 identify stream slots, not guaranteed handedness. Fingertips use rings with
 a small center in both modes; invalid points are hidden, low confidence fades,
-and contact with the keyboard adds a subtle warm highlight).
+and contact with the keyboard adds a subtle warm highlight),
+`frame-export on <dir>|off|status`, `hands-inject <json>`, `hands dump`.
+
+`frame-export` publishes the live camera frame, its LiDAR depth map and the
+scene-frame head pose at capture into a directory, and `hands-inject` takes
+21 joints back; together they let hand tracking run on the Mac (MediaPipe over
+the exported frames — `hands/README.md`) and feed the same joints the phone's
+`0x05` packet fills. `hands status` says which source is live
+(`source=phone|mac age_ms=<n>`) and `hands dump` returns the joints the
+gesture engine is seeing. Full contract: `HACK_CHANGES.md`.
 
 `stats` reports `packet_rate`, `panels`, `frame_age_ms`, `have_intrinsics`,
 and `view_lag_ms`. `frame_age_ms` is milliseconds since the last camera frame

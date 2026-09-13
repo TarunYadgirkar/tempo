@@ -531,10 +531,13 @@ int main() {
     CHECK(c.request("clear-anchor 1") == "ok");
 
     // ---- hand skeleton overlay toggles at runtime ----
-    CHECK(c.request("hands overlay status") == "ok overlay=on");  // default
-    CHECK(c.request("hands overlay off") == "ok overlay=off");
-    CHECK(c.request("hands overlay status") == "ok overlay=off");
-    CHECK(c.request("hands overlay on") == "ok overlay=on");
+    // The reply carries the tracking source after the overlay flag (see
+    // tests/test_hands_e2e.cpp), so match the prefix rather than the line.
+    CHECK(c.request("hands overlay status").rfind("ok overlay=on", 0) == 0);
+    CHECK(c.request("hands overlay off").rfind("ok overlay=off", 0) == 0);
+    CHECK(c.request("hands overlay status").rfind("ok overlay=off", 0) == 0);
+    CHECK(c.request("hands overlay on").rfind("ok overlay=on", 0) == 0);
+    CHECK(contains(c.request("hands overlay status"), "source=phone"));
     CHECK(contains(c.request("hands overlay sideways"), "err parse_error"));
 
     // ---- input routed to the focused internal panel ----

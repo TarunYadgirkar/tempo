@@ -84,22 +84,34 @@ bool parse_hands_inject(const std::string &json, injected_hands &out,
 // Milliseconds since the Unix epoch — the clock `t` is measured against.
 uint64_t hand_inject_now_ms();
 
-// Latest injection plus its freshness. Holds no lock of its own; the scene
-// owns it under the scene mutex.
+// Latest injection per chirality, plus its freshness. Holds no lock of its
+// own; the scene owns it under the scene mutex.
+//
+// Storage is per hand rather than per message because the control socket caps
+// a request line at ~1.1 kB (CTL_CONN_INPUT_MAX) and two hands of 21 joints
+// do not comfortably fit in one, so a tracker seeing both hands sends two
+// messages. Each `hands-inject` therefore REPLACES the chiralities it carries
+// and leaves the other one alone to age out on its own 150 ms clock; an empty
+// `hands` array is the explicit "no hands in view this frame" and clears
+// both. Left occupies scene slot 0, right slot 1 — a fixed assignment, which
+// is already better than the phone's flip-flopping slots.
 class hand_inject_store {
    public:
+    static constexpr int LEFT = 0, RIGHT = 1;
+
     void set(const injected_hands &h);
     bool ever_set() const { return ever_; }
-    // Age of the held injection in ms; 0 when nothing was ever injected.
+    // Age of the freshest held hand in ms; 0 when nothing was ever injected.
     uint64_t age_ms(uint64_t now_ms) const;
-    // True while the held injection is younger than HAND_INJECT_FRESH_MS and
-    // so should replace the phone's hands.
+    // True while at least one held hand is younger than HAND_INJECT_FRESH_MS
+    // and so should replace the phone's hands.
     bool fresh(uint64_t now_ms) const;
-    const injected_hands &hands() const { return hands_; }
+    bool slot_fresh(int slot, uint64_t now_ms) const;
+    const sb_hand_t &slot_hand(int slot) const { return hands_[slot]; }
 
    private:
-    injected_hands hands_;
-    uint64_t received_ms_ = 0;
+    sb_hand_t hands_[2] = {};
+    uint64_t received_ms_[2] = {0, 0};
     bool ever_ = false;
 };
 

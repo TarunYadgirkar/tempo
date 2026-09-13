@@ -918,11 +918,12 @@ void scene::ingest_hand(int slot, const sb_hand_t &hand, bool already_scene) {
 }
 
 bool scene::adopt_injected_hands() {
-    if (!hand_inject_.fresh(hand_inject_now_ms()))
+    const uint64_t now = hand_inject_now_ms();
+    if (!hand_inject_.fresh(now))
         return false;
-    const injected_hands &inj = hand_inject_.hands();
-    for (int i = 0; i < inj.count; i++)
-        ingest_hand(i, inj.hands[i], true);
+    for (int slot = 0; slot < 2; slot++)
+        if (hand_inject_.slot_fresh(slot, now))
+            ingest_hand(slot, hand_inject_.slot_hand(slot), true);
     return true;
 }
 
