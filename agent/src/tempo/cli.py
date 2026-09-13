@@ -88,13 +88,14 @@ def cmd_objects(args: argparse.Namespace) -> None:
         seen = None
         while True:
             frame = objects.read_export(args.frames)
-            if frame and frame[1].get("t_ms") != seen:
-                seen = frame[1].get("t_ms")
+            stamp = frame[1].get("seq", frame[1].get("t_ns")) if frame else None
+            if frame and stamp != seen:
+                seen = stamp
                 once(frame[0], frame[1], Path(args.frames))
                 if args.once:
                     return
             elif not frame:
-                print(f"waiting for {args.frames}/latest.jpg", end="\r")
+                print(f"waiting for {args.frames}/latest.json", end="\r")
             time.sleep(0.15)
 
     if args.image:

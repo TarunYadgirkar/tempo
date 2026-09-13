@@ -151,7 +151,7 @@ class DepthMap:
     def load(cls, meta: dict[str, Any] | None, base: Path) -> "DepthMap | None":
         if not meta:
             return None
-        path = Path(meta["path"])
+        path = Path(meta.get("path") or meta.get("file") or "latest.depth")
         if not path.is_absolute():
             path = base / path
         if not path.exists():
@@ -321,7 +321,10 @@ FALLBACK_INTRINSICS_FOV_DEG = 60.0
 
 def _intrinsics_for(image: Image.Image, meta: dict[str, Any] | None) -> dict[str, Any]:
     if meta and meta.get("intrinsics"):
-        return meta["intrinsics"]
+        k = dict(meta["intrinsics"])
+        k.setdefault("width", k.get("image_width", image.width))
+        k.setdefault("height", k.get("image_height", image.height))
+        return k
     import math
 
     f = image.width / (2 * math.tan(math.radians(FALLBACK_INTRINSICS_FOV_DEG) / 2))
@@ -343,7 +346,7 @@ def process_frame(
     """Detect, place in the scene frame, fold into the map. Returns what was seen and the inference ms."""
     image_path = Path(image_path)
     base = base or image_path.parent
-    image = Image.open(image_path).convert("RGB")
+    image = _open_frame(image_path, meta)
     dets, ms = Detector.shared(backend, prompts).detect(image, conf)
     head = (meta or {}).get("head") or IDENTITY_HEAD
     intr = _intrinsics_for(image, meta)
@@ -353,13 +356,29 @@ def process_frame(
     return located, ms
 
 
+def _open_frame(image_path: Path, meta: dict[str, Any] | None) -> Image.Image:
+    """JPEG/PNG, or the shell's raw rgb8 export (uint8 RGB, dims from the sidecar)."""
+    info = (meta or {}).get("image") or {}
+    if info.get("format") == "rgb8" or image_path.suffix == ".rgb":
+        import numpy as np
+
+        w, h = int(info["width"]), int(info["height"])
+        buf = np.frombuffer(image_path.read_bytes(), dtype=np.uint8)
+        return Image.fromarray(buf[: w * h * 3].reshape(h, w, 3), "RGB")
+    return Image.open(image_path).convert("RGB")
+
+
 def read_export(frames_dir: str | Path) -> tuple[Path, dict[str, Any]] | None:
-    """The shell's frame export: latest.jpg plus latest.json. None until the shell has written one."""
+    """The shell's frame export: latest.json names the image file (latest.rgb or latest.jpg)."""
     d = Path(frames_dir)
-    img, meta = d / "latest.jpg", d / "latest.json"
+    meta_path = d / "latest.json"
+    if not meta_path.exists():
+        return None
+    meta = json.loads(meta_path.read_text())
+    img = d / ((meta.get("image") or {}).get("file") or "latest.jpg")
     if not img.exists():
         return None
-    return img, (json.loads(meta.read_text()) if meta.exists() else {})
+    return img, meta
 
 
 def read_pair(image_path: str | Path, meta_path: str | Path | None = None) -> tuple[Path, dict[str, Any]]:
