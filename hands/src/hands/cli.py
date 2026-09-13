@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+from pathlib import Path
 import sys
 
 from .backends import BACKENDS, DEFAULT_BACKEND, DEFAULT_MODEL
@@ -265,7 +267,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _common(check)
     _gates(check)
+    cal = sub.add_parser("calibrate", help="tune pinch/fist thresholds to your hand and write gestures.toml")
+    cal.add_argument("--sock", default=None)
+    cal.add_argument("--write", action="store_true", help="write ~/.config/spatial-os/gestures.toml")
+    cal.add_argument("--phase-seconds", type=float, default=6.0)
+    cal.add_argument("--results", default=str(Path(__file__).resolve().parents[2] / "results"))
     return parser
+
+
+def run_calibrate(args) -> int:
+    from .calibrate import run
+
+    if args.sock:
+        os.environ["SPATIAL_OS_SOCK"] = args.sock
+    run(args.write, Path(args.results), print, args.phase_seconds)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -274,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_track(args)
     if args.command == "check":
         return run_check(args)
+    if args.command == "calibrate":
+        return run_calibrate(args)
     return run_eval(args)
 
 
