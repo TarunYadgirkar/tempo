@@ -4,6 +4,10 @@ Team Tempo (Tarun Yadgirkar, UC Berkeley), Deep Tech / Physical AI track, freest
 Repo: https://github.com/TarunYadgirkar/tempo
 Video: attached in this folder
 
+Why me
+
+This is not a weekend idea. Outside the hackathon I am building Vantage, spatial AR glasses and the operating system for them, with a cofounder, under Project Ithaca. The native Mac compositor that Tempo runs on, the iPhone sensor bridge, and the gesture engine come from that work, and the company is currently interviewing with a16z. Tempo is the agent layer that project has been missing: the part that turns a spatial display into something that understands the room. Whatever gets proven here ships in the product.
+
 What we are building
 
 Every computer people use today was designed before AI. Phones, laptops, and even the current headsets take an app grid and put it somewhere, then try to wrap an assistant around it. For the Deep Tech track we are building the opposite: a pair of spatial glasses and the operating system for them, designed from the start around an agent that lives in the room with you. The long-term product is Vantage: lightweight AR glasses and the spatial OS together, meant to replace the phone and the laptop for daily work, with compute split between the glasses, a pocket unit, and the cloud.
