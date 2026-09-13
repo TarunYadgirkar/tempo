@@ -40,6 +40,10 @@ constexpr float GRAB_DEADBAND_M = 0.02f;
 // head via placement_math.h.
 constexpr float SPAWN_POS[3] = {0.0f, 0.0f, -1.2f};
 constexpr float SPAWN_STEP_X = 0.25f;
+// A spawn closer than this to an existing panel is on top of it.
+constexpr float SPAWN_MIN_GAP_M = 0.30f;
+// Never pull a spawn closer than this, whatever the depth map says.
+constexpr float SPAWN_MIN_DISTANCE_M = 0.40f;
 // A hole this long in the pose stream means the phone app most likely restarted
 // its ARKit session, so its origin has moved (wxrd main.c uses the same 2 s).
 constexpr double POSE_GAP_RECAPTURE_S = 2.0;
@@ -1067,27 +1071,107 @@ bool scene::scene_head_quat(float out_quat[4]) const {
     return true;
 }
 
-void scene::place_new_panel(panel &p) {
+float scene::depth_ahead_locked(const float origin[3],
+                                const float dir[3]) const {
+    // mutex_ held. Distance to the first real surface along `dir`, from the
+    // LiDAR depth map; -1 when there is no depth or nothing is hit. The plane
+    // list is sparse and stale (checkpoint 1), so spawn asks the depth map.
+    if (!latest_depth_.have_pose || !latest_depth_.have_intrinsics ||
+        latest_depth_.depth.empty())
+        return -1.0f;
+    depth_cast_input in;
+    in.depth = latest_depth_.depth.data();
+    in.width = (int)latest_depth_.width;
+    in.height = (int)latest_depth_.height;
+    in.intr = latest_depth_.intr;
+    v3copy(latest_depth_.cam_pos, in.cam_pos);
+    for (int i = 0; i < 4; i++)
+        in.cam_quat[i] = latest_depth_.cam_quat[i];
+    depth_cast_result r;
+    if (!depth_cast_ray(in, origin, dir, r))
+        return -1.0f;
+    return r.distance_m;
+}
+
+void scene::spawn_pose_locked(const panel &p, float out_pos[3],
+                              float *out_yaw) const {
+    // mutex_ held. In front of the CURRENT head: along the horizontal
+    // forward, ~10 cm below the eyes, above the floor, clear of planes and of
+    // whatever the depth map says is actually there, facing the head. Then
+    // the nearest free slot sideways, so a spawn never lands on a panel that
+    // is already in front of the user — which is what "I launched it and
+    // nothing showed" was: the fourth launch sat exactly on the first.
     float head_quat[4];
-    if (scene_head_quat(head_quat)) {
-        // In front of the CURRENT head: 0.9 m along the horizontal forward,
-        // ~10 cm below the eyes, above the floor, clear of planes, facing
-        // the head. Stacked spawns nudge sideways so panels don't coincide.
-        spawn_tuning tune;
-        spawn_pose_in_front(env_, env_.head_pos, head_quat, planes_,
-                            n_planes_, tune, p.pos, &p.yaw);
-        float step = SPAWN_STEP_X * (float)((p.handle - 1) % 3);
-        p.pos[0] += std::cos(p.yaw) * step;  // along the panel's right
-        p.pos[2] += -std::sin(p.yaw) * step;
-        p.yaw = yaw_facing(p.pos, env_.head_pos);
-    } else {
+    if (!scene_head_quat(head_quat)) {
         // No pose yet (tests / pose-less runs): legacy spawn shelf.
-        p.pos[0] = SPAWN_POS[0] + SPAWN_STEP_X * (float)((p.handle - 1) % 5);
-        p.pos[1] = SPAWN_POS[1];
-        p.pos[2] = SPAWN_POS[2];
-        p.yaw = 0.0f;
+        out_pos[0] = SPAWN_POS[0] + SPAWN_STEP_X * (float)((p.handle - 1) % 5);
+        out_pos[1] = SPAWN_POS[1];
+        out_pos[2] = SPAWN_POS[2];
+        if (out_yaw)
+            *out_yaw = 0.0f;
+        return;
     }
+    spawn_tuning tune;
+    float fwd[3];
+    head_forward_horizontal(head_quat, fwd);
+    float ahead = depth_ahead_locked(env_.head_pos, fwd);
+    if (ahead > 0.0f && ahead - tune.plane_clearance_m < tune.distance_m)
+        tune.distance_m =
+            std::max(SPAWN_MIN_DISTANCE_M, ahead - tune.plane_clearance_m);
+    float base[3], yaw;
+    place_in_front(env_, env_.head_pos, fwd, planes_, n_planes_, tune, base,
+                   &yaw);
+
+    // Candidate slots along the panel's right, nearest first.
+    static const float STEPS[] = {0.0f, 1.0f, -1.0f, 2.0f, -2.0f};
+    float best_pos[3] = {base[0], base[1], base[2]};
+    float best_clear = -1.0f;
+    for (float k : STEPS) {
+        float cand[3] = {base[0] + std::cos(yaw) * SPAWN_STEP_X * k, base[1],
+                         base[2] - std::sin(yaw) * SPAWN_STEP_X * k};
+        float clear = 1e9f;
+        for (const auto &q : panels_) {
+            if (q->handle == p.handle)
+                continue;
+            float d[3];
+            v3sub(cand, q->target_pos, d);
+            clear = std::min(clear, v3length(d));
+        }
+        if (clear >= SPAWN_MIN_GAP_M) {
+            v3copy(cand, best_pos);
+            best_clear = clear;
+            break;
+        }
+        if (clear > best_clear) {
+            v3copy(cand, best_pos);
+            best_clear = clear;
+        }
+    }
+    v3copy(best_pos, out_pos);
+    if (out_yaw)
+        *out_yaw = yaw_facing(out_pos, env_.head_pos);
+}
+
+void scene::place_new_panel(panel &p) {
+    spawn_pose_locked(p, p.pos, &p.yaw);
     v3copy(p.pos, p.target_pos);
+}
+
+bool scene::recall_panel(uint64_t handle) {
+    // A launch for a window that already has a panel: bring that panel back
+    // in front of the head and focus it, rather than streaming it twice.
+    std::lock_guard<std::mutex> lock(mutex_);
+    panel *p = find_panel(handle);
+    if (!p)
+        return false;
+    if (!p->has_anchor && p->handle != grabbed_) {
+        spawn_pose_locked(*p, p->target_pos, &p->yaw);
+        v3copy(p->target_pos, p->pos);
+        p->has_pose_quat = false;
+    }
+    focus_locked(handle);
+    push_event(handle_event("recall", handle));
+    return true;
 }
 
 uint64_t scene::spawn_panel_impl(const std::string &app_id,
@@ -1102,9 +1186,8 @@ uint64_t scene::spawn_panel_impl(const std::string &app_id,
     p->surface.resize(p->width_px, p->height_px);
     uint64_t h = p->handle;
     panels_.push_back(std::move(p));
-    if (focused_ == 0)
-        focused_ = h;
     push_event(handle_event("window-map", h));
+    focus_locked(h);  // what the user just opened is what they look at
     return h;
 }
 
@@ -1128,9 +1211,8 @@ uint64_t scene::spawn_captured_panel(const std::string &app_id,
     place_new_panel(*p);
     uint64_t h = p->handle;
     panels_.push_back(std::move(p));
-    if (focused_ == 0)
-        focused_ = h;
     push_event(handle_event("window-map", h));
+    focus_locked(h);
     return h;
 }
 

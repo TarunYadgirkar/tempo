@@ -637,6 +637,26 @@ void capture_manager::attempt_capture(std::weak_ptr<impl> weak,
           return;
       }
 
+      // Already on a panel: bring that panel back rather than stream the
+      // same window twice (every launcher pick used to add a duplicate).
+      {
+          uint64_t existing = 0;
+          {
+              std::lock_guard<std::mutex> lock(im->mutex);
+              for (const auto &kv : im->streams)
+                  if (kv.second.window_id == (uint32_t)match.windowID) {
+                      existing = kv.first;
+                      break;
+                  }
+          }
+          if (existing) {
+              std::fprintf(stderr, "capture: '%s' is already panel %llu, recalling\n",
+                           want.c_str(), (unsigned long long)existing);
+              im->with_world([&](scene &w) { w.recall_panel(existing); });
+              return;
+          }
+      }
+
       // Desktop-independent window filter: captures ONLY the chosen window,
       // never the whole display.
       SCContentFilter *filter = [[SCContentFilter alloc]

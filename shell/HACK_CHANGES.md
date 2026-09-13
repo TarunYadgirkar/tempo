@@ -370,3 +370,8 @@ depth read and the lag arithmetic.
 Files: `hands/src/hands/check.py` (new), `hands/src/hands/{cli,tracker,
 geometry}.py`, `hands/tests/test_check.py` (new),
 `hands/eval/fixtures/hand-frame/` (new). 86 pytest, no shell sources touched.
+
+### Sun Sep 13, morning: launched windows that "never showed"
+- `scene::place_new_panel` used three fixed sideways slots keyed on the handle, so the fourth launch sat exactly on the first, and a new spawn never took focus. Spawn now takes the nearest free slot (`SPAWN_MIN_GAP_M`), pulls in ahead of the depth-cast surface along the head forward, and the new panel is focused.
+- `scene::recall_panel` + capture.mm: launching an app whose window is already streamed recalls that panel in front of the head instead of opening a duplicate stream. Emits `event recall handle=N`.
+- hands daemon: `--max-range-m` (1.0) and `--min-confidence` (0.5) drop hand-shaped detections across the room before they reach `hands-inject`; a 1.5 m phantom had been outranking the phone's own hands.

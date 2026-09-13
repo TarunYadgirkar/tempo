@@ -171,6 +171,8 @@ class scene {
     // Returns 1 anchored (out_uuid filled), 0 no anchor, -1 no such window.
     int query_anchor(uint64_t handle, uint8_t out_uuid[16]);
     bool focus_panel(uint64_t handle);
+    // Re-place an existing panel in front of the head and focus it.
+    bool recall_panel(uint64_t handle);
     bool close_panel(uint64_t handle);
     bool resize_panel(uint64_t handle, int width, int height);
     // Input routed to the focused panel's input log. false → no focus.
@@ -412,6 +414,9 @@ class scene {
     // Head-relative spawn placement (falls back to the legacy shelf when no
     // pose has arrived). mutex_ held.
     void place_new_panel(panel &p);
+    void spawn_pose_locked(const panel &p, float out_pos[3],
+                           float *out_yaw) const;
+    float depth_ahead_locked(const float origin[3], const float dir[3]) const;
     int gather_panels_impl();
     bool scene_head_quat(float out_quat[4]) const;
     void on_key_emit(uint32_t keysym, const char *label, bool repeat);

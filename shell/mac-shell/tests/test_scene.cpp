@@ -170,7 +170,7 @@ static void test_spawn_and_move() {
     uint64_t b = s.spawn_panel("test-card", "beta");
     CHECK(a == 1 && b == 2);
     CHECK(s.panel_count() == 2);
-    CHECK(s.focused_handle() == a);  // first panel takes focus
+    CHECK(s.focused_handle() == b);  // the newest spawn takes focus
 
     float target[3] = {0.5f, 0.25f, -1.0f};
     CHECK(s.move_panel(a, target, false));
@@ -196,6 +196,27 @@ static void test_spawn_and_move() {
     CHECK(s.panel_count() == 1);
 }
 
+
+static void test_stacked_spawns_do_not_coincide() {
+    // Seven launches used to cycle three sideways slots, so the fourth sat
+    // exactly on the first and looked like it never opened.
+    scene s;
+    s.inject_pose(identity_pose());
+    std::vector<uint64_t> handles;
+    for (int i = 0; i < 5; i++)
+        handles.push_back(s.spawn_panel("test-card", "p" + std::to_string(i)));
+    for (size_t i = 0; i < handles.size(); i++) {
+        for (size_t j = i + 1; j < handles.size(); j++) {
+            float a[3], b[3];
+            CHECK(s.panel_pose(handles[i], a));
+            CHECK(s.panel_pose(handles[j], b));
+            float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+            CHECK(std::sqrt(dx * dx + dy * dy + dz * dz) >= 0.25f);
+        }
+    }
+    CHECK(s.focused_handle() == handles.back());
+}
+
 static void test_pinch_focus() {
     scene s;
     s.inject_pose(identity_pose());
@@ -206,6 +227,8 @@ static void test_pinch_focus() {
     // pinch will happen.
     float near_pos[3] = {0.0f, 0.1f, 0.0f};
     CHECK(s.move_panel(near_panel, near_pos, false));
+    // The newest spawn is focused; hand focus back so the pinch has to earn it.
+    CHECK(s.focus_panel(far_panel));
     CHECK(s.focused_handle() == far_panel);
     (void)s.drain_events();
 
@@ -1238,6 +1261,7 @@ int main() {
     test_aim_ignores_unreliable_fingertips();
     test_pinch_hit_beats_nearby_missed_panel();
     test_spawn_and_move();
+    test_stacked_spawns_do_not_coincide();
     test_pinch_focus();
     test_anchor_follows_plane();
     test_nan_plane_keeps_finite_pose();
