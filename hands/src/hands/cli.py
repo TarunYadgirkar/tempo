@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from .backends import BACKENDS, DEFAULT_BACKEND, DEFAULT_MODEL
+from .check import run_check
 from .evaluate import DEFAULT_WINDOW_S, run_eval
 from .track import run_track
 from .tracker import DEFAULT_DEPTH_MODE, DEFAULT_HOLD_FRAMES, DEPTH_MODES
@@ -99,24 +100,27 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--min-cutoff",
         type=float,
-        default=1.0,
+        default=2.0,
         help="One Euro cutoff floor in Hz — lower is smoother and laggier",
     )
     p.add_argument(
         "--beta",
         type=float,
-        default=0.02,
+        default=10.0,
         help=(
-            "One Euro speed coupling on the joints — higher tracks fast "
-            "motion more closely. Tuned for the ~12 Hz this pipeline actually "
-            "runs at, where the old 0.5 raised the cutoff above the frame "
-            "rate on any real movement and passed the noise straight through"
+            "One Euro speed coupling on the joints, in Hz per metre/second. "
+            "The joint speeds this sees are in m/s, so a beta under ~1 never "
+            "lifts the cutoff off its floor at any speed a hand moves at and "
+            "the filter degenerates into a fixed low-pass: at the old 0.02 a "
+            "hand moving 0.3 m/s was drawn 4.7 cm — about 45 px at half a "
+            "metre — behind itself, whether it was moving or not. `hands "
+            "check` reports that offset in pixels"
         ),
     )
     p.add_argument(
         "--range-min-cutoff",
         type=float,
-        default=0.4,
+        default=1.5,
         help=(
             "One Euro cutoff floor on the hand's RANGE, which every joint "
             "depends on. Lower than the joints' because an arm changes its "
@@ -126,8 +130,13 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--range-beta",
         type=float,
-        default=0.005,
-        help="One Euro speed coupling on the hand's range",
+        default=2.0,
+        help=(
+            "One Euro speed coupling on the hand's range, in Hz per "
+            "metre/second. Same failure as --beta: at the old 0.005 the "
+            "range never left its 0.4 Hz floor, so an arm reaching out at "
+            "0.5 m/s had its hand placed 20 cm short until it stopped"
+        ),
     )
     p.add_argument(
         "--hold-frames",
@@ -218,6 +227,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="turn `frame-export` on for --dir before starting, and off after",
     )
+
+    check = sub.add_parser(
+        "check",
+        help=(
+            "one frame, end to end: reproject the joints through the same "
+            "camera that made them, report the registration lag in pixels, "
+            "and compare against the phone's own skeleton"
+        ),
+    )
+    _common(check)
     return parser
 
 
@@ -225,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "track":
         return run_track(args)
+    if args.command == "check":
+        return run_check(args)
     return run_eval(args)
 
 

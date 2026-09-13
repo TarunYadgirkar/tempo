@@ -253,3 +253,42 @@ def sample_depth(
     """
     valid = depth_patch_values(depth, u_norm, v_norm, window)
     return float(np.median(valid)) if valid.size else 0.0
+
+
+def quat_conj(q: np.ndarray) -> np.ndarray:
+    q = np.asarray(q, dtype=np.float64)
+    return np.array([-q[0], -q[1], -q[2], q[3]])
+
+
+def scene_to_camera(
+    cam_pos: np.ndarray, cam_quat: np.ndarray, p_scene: np.ndarray
+) -> np.ndarray:
+    """Scene-frame point -> camera space. Inverse of `camera_to_scene`."""
+    rel = np.asarray(p_scene, dtype=np.float64) - np.asarray(
+        cam_pos, dtype=np.float64
+    )
+    return quat_rotate(quat_conj(cam_quat), rel)
+
+
+def project(
+    intr: Intrinsics,
+    img_w: float,
+    img_h: float,
+    p_cam: np.ndarray,
+) -> np.ndarray | None:
+    """Camera-space point -> a pixel in an image of img_w x img_h.
+
+    Exact inverse of `unproject`, and the same mapping the shell's renderer
+    applies when it draws a scene-frame joint over the passthrough (the
+    projection and the passthrough UV transform compose to this). None for a
+    point at or behind the camera plane.
+    """
+    depth_m = -float(p_cam[2])
+    if not depth_m > 0.0 or not intr.valid() or img_w <= 0.0 or img_h <= 0.0:
+        return None
+    px = intr.cx + intr.fx * float(p_cam[0]) / depth_m
+    py = intr.cy - intr.fy * float(p_cam[1]) / depth_m
+    return np.array(
+        [px * (img_w / intr.image_width), py * (img_h / intr.image_height)],
+        dtype=np.float64,
+    )

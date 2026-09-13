@@ -325,3 +325,48 @@ over the socket; `test_hand_inject.cpp` pins the `frame_t_ns` parse, its
 refusals, that "no hands in view" retracts the stamp with the hands, and that
 the nanosecond stamp survives its round trip through a JSON double to within
 ~256 ns. 45 pytest and 31 ctest, all green.
+
+---
+
+## The overlay was drawn behind the hand: `hands check`
+
+With `hands-inject` live the skeleton sat 30-60 px off the real hand in the
+passthrough, shape intact. Every geometric suspect was wrong. `uv run hands
+check --dir <export dir>` takes one exported frame, unprojects pixels to the
+scene frame and puts them back through the SAME intrinsics and head pose: the
+round trip closes to **0.0006 px** over a grid of 49 LiDAR-backed pixels, so
+the capture-pixel rescale, the principal point, the ARKit y/z flips and the
+quaternion all agree with each other and with `hand_inject.cpp`. The renderer
+agrees too, by construction: `passthrough_uv_mapping` composed with
+`perspective_rh` and the orientation-bucket roll reduces algebraically to the
+pinhole `unproject_pixel` inverts, offsets and portrait buckets included. And
+under the rigid shape model a wrong LiDAR range slides a joint along its OWN
+pixel ray, which cannot move it in the picture at all.
+
+What was left was time. The One Euro stage smooths the joints in the scene
+frame, and its speed coupling was `beta=0.02` against joint speeds measured in
+**metres per second** — 0.3 m/s lifts a 1.0 Hz cutoff to 1.006 Hz, so the
+filter was a fixed 1 Hz low-pass and never the adaptive one it is named after.
+A first-order low-pass tracks a ramp one time constant behind it: 158 ms, or
+4.7 cm, or **45 px at half a metre**, for a hand moving gently, and 149 px for
+one moving at 1 m/s. The hand's RANGE had the same defect twice as badly
+(`0.4 Hz`, `beta=0.005`): an arm reaching out at 0.5 m/s had its hand placed
+20 cm short until it stopped.
+
+Defaults now `--min-cutoff 2.0 --beta 10.0` and `--range-min-cutoff 1.5
+--range-beta 2.0`, which puts the same hand **9 px** behind itself at 0.3 m/s
+and 13 px at 1 m/s, and the range within 3 cm of a reaching arm. `hands check`
+prints the offset in pixels at the frame's own measured range and fails past
+15 px, which is the width of a fingertip reticle at that range.
+
+`hands check` also compares the mac joints against the phone's own
+(`hands dump`, source=phone) landmark by landmark when both see a hand. That
+comparison has NOT been run: the only saved frame set
+(`hands/eval/fixtures/hand-frame/`, seq 14190, kept as the fixture) is the
+phone face-down on a desk with no hand in it, and the phone had no hand in
+view at the time of writing. The fixture still exercises the round trip, the
+depth read and the lag arithmetic.
+
+Files: `hands/src/hands/check.py` (new), `hands/src/hands/{cli,tracker,
+geometry}.py`, `hands/tests/test_check.py` (new),
+`hands/eval/fixtures/hand-frame/` (new). 86 pytest, no shell sources touched.
