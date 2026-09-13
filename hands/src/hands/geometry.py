@@ -33,7 +33,9 @@ THUMB_IP = 3
 THUMB_TIP = 4
 INDEX_MCP = 5
 INDEX_TIP = 8
+MIDDLE_MCP = 9
 MIDDLE_TIP = 12
+RING_MCP = 13
 RING_TIP = 16
 PINKY_MCP = 17
 PINKY_TIP = 20
@@ -213,6 +215,28 @@ def chirality_from_pixels(landmarks_px: np.ndarray, dorsal: bool = True) -> str 
     return "left" if palmar_answer == "right" else "right"
 
 
+def depth_patch_values(
+    depth: np.ndarray, u_norm: float, v_norm: float, window: int = 5
+) -> np.ndarray:
+    """The valid readings in a `window` x `window` patch, unordered.
+
+    Separate from `sample_depth` because the rigid-shape path pools the
+    patches under several landmarks and takes ONE median over all of them —
+    taking a median per patch first and combining afterwards would give a
+    knuckle that landed in a hole the same vote as one that landed on skin.
+    """
+    h, w = depth.shape
+    cx = int(round(u_norm * (w - 1)))
+    cy = int(round(v_norm * (h - 1)))
+    r = window // 2
+    x0, x1 = max(0, cx - r), min(w, cx + r + 1)
+    y0, y1 = max(0, cy - r), min(h, cy + r + 1)
+    if x0 >= x1 or y0 >= y1:
+        return np.empty(0, dtype=np.float64)
+    patch = depth[y0:y1, x0:x1]
+    return np.asarray(patch[(patch > 0.0) & np.isfinite(patch)], dtype=np.float64)
+
+
 def sample_depth(
     depth: np.ndarray, u_norm: float, v_norm: float, window: int = 5
 ) -> float:
@@ -227,16 +251,5 @@ def sample_depth(
 
     0.0 when every sample in the patch is invalid.
     """
-    h, w = depth.shape
-    cx = int(round(u_norm * (w - 1)))
-    cy = int(round(v_norm * (h - 1)))
-    r = window // 2
-    x0, x1 = max(0, cx - r), min(w, cx + r + 1)
-    y0, y1 = max(0, cy - r), min(h, cy + r + 1)
-    if x0 >= x1 or y0 >= y1:
-        return 0.0
-    patch = depth[y0:y1, x0:x1]
-    valid = patch[(patch > 0.0) & np.isfinite(patch)]
-    if valid.size == 0:
-        return 0.0
-    return float(np.median(valid))
+    valid = depth_patch_values(depth, u_norm, v_norm, window)
+    return float(np.median(valid)) if valid.size else 0.0

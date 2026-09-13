@@ -6,8 +6,9 @@ import argparse
 import sys
 
 from .backends import BACKENDS, DEFAULT_BACKEND, DEFAULT_MODEL
-from .evaluate import run_eval
+from .evaluate import DEFAULT_WINDOW_S, run_eval
 from .track import run_track
+from .tracker import DEFAULT_DEPTH_MODE, DEFAULT_HOLD_FRAMES, DEPTH_MODES
 
 
 def _common(p: argparse.ArgumentParser) -> None:
@@ -85,6 +86,17 @@ def _common(p: argparse.ArgumentParser) -> None:
         ),
     )
     p.add_argument(
+        "--depth",
+        choices=DEPTH_MODES,
+        default=DEFAULT_DEPTH_MODE,
+        help=(
+            "how a joint gets its range. rigid takes ONE range for the whole "
+            "hand from the palm and places the other twenty joints with a "
+            "hand-shape model; per-joint reads the depth map under every "
+            "landmark, which is the older path and the one rigid has to beat"
+        ),
+    )
+    p.add_argument(
         "--min-cutoff",
         type=float,
         default=1.0,
@@ -93,8 +105,39 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--beta",
         type=float,
-        default=0.5,
-        help="One Euro speed coupling — higher tracks fast motion more closely",
+        default=0.02,
+        help=(
+            "One Euro speed coupling on the joints — higher tracks fast "
+            "motion more closely. Tuned for the ~12 Hz this pipeline actually "
+            "runs at, where the old 0.5 raised the cutoff above the frame "
+            "rate on any real movement and passed the noise straight through"
+        ),
+    )
+    p.add_argument(
+        "--range-min-cutoff",
+        type=float,
+        default=0.4,
+        help=(
+            "One Euro cutoff floor on the hand's RANGE, which every joint "
+            "depends on. Lower than the joints' because an arm changes its "
+            "distance slowly and the LiDAR's ranging noise does not"
+        ),
+    )
+    p.add_argument(
+        "--range-beta",
+        type=float,
+        default=0.005,
+        help="One Euro speed coupling on the hand's range",
+    )
+    p.add_argument(
+        "--hold-frames",
+        type=int,
+        default=DEFAULT_HOLD_FRAMES,
+        help=(
+            "frames a hand keeps being sent after the model stops finding it, "
+            "so one dropped detection mid-pinch does not read downstream as "
+            "the hand leaving. 0 disables the hold"
+        ),
     )
     p.add_argument(
         "--depth-window",
@@ -146,11 +189,23 @@ def build_parser() -> argparse.ArgumentParser:
     _common(ev)
     ev.add_argument("--seconds", type=float, default=60.0)
     ev.add_argument(
+        "--window-s",
+        type=float,
+        default=DEFAULT_WINDOW_S,
+        help=(
+            "length of one alternating window. The run flips between "
+            "injection OFF (the shell's hands are the phone's, so the phone "
+            "column is clean) and injection ON (the shell's hands are this "
+            "tracker's, which is the mac column measured on the live path)"
+        ),
+    )
+    ev.add_argument(
         "--inject",
         action="store_true",
         help=(
-            "also inject while recording. Off by default so the phone's hands "
-            "stay the live source and both sources can be sampled independently"
+            "legacy: inject for the WHOLE run instead of alternating. Makes "
+            "the phone column meaningless, since `hands dump` then returns "
+            "the Mac's own joints — kept only to reproduce the old numbers"
         ),
     )
     ev.add_argument(

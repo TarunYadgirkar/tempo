@@ -6,8 +6,9 @@ on rotation and its fingertips wander by centimetres, so pinch, point and fist
 fire late or not at all.
 
 This package moves the tracking to the Mac. A hand model runs over the camera
-frames the shell exports, each landmark takes its range from the LiDAR depth
-map, and the resulting metric joints go back into the shell through
+frames the shell exports, the LiDAR depth map says how far away the hand is, a
+hand-shape model turns that one range into 21, and the resulting metric joints
+go back into the shell through
 `hands-inject` — the same 21 landmarks, the same order, the same scene frame
 the phone's `0x05` packet uses. Nothing downstream changes: every gesture
 already built on those joints gets the better ones for free.
@@ -34,8 +35,8 @@ use, because its ONNX export carries grid-decode ops CoreML infers at the
 wrong rank and ONNX Runtime raises on rather than falling back.
 
 RTMPose gives 21 points and nothing else: no handedness, and no metric hand
-model for the landmarks that miss the LiDAR. See **Handedness** and **How a
-landmark becomes a point in the room** below for what fills both gaps.
+model. See **Handedness** and **How a landmark becomes a point in the room**
+below for what fills both gaps.
 
 ## Setup
 
@@ -69,12 +70,14 @@ is reachable by anything running as you, and the verb writes files.
 One line a second says how it is doing:
 
 ```
- 30.0 fps | detect 1.00 | depth 0.78 | landmark   5.7 ms | e2e    7.3 ms
+ 14.7 fps | detect 1.00 | depth 0.98 | held  0 | range 0.52 m | landmark   5.7 ms | e2e    7.3 ms
 ```
 
 `detect` is the fraction of frames with a hand, `depth` the fraction of
-landmarks that got a real LiDAR reading rather than an estimated range, and
-`e2e` the instant the shell published the frame to the moment it acked the
+landmarks that got a real LiDAR reading (reporting only under the default
+`--depth rigid`, where no joint is placed with one), `held` the frames a
+dropped detection was covered by re-sending the last hand, `range` the hand's
+smoothed distance, and `e2e` the instant the shell published the frame to the moment it acked the
 injection made from it — the number that decides whether a pinch feels live.
 
 Both ends of `e2e` are this Mac's realtime clock: the shell stamps `export_ns`
@@ -97,46 +100,76 @@ freezing your hands in mid-air.
 ## Measure it
 
 ```sh
-uv run hands eval --dir "$TMPDIR/spatula-frames" --enable-export --seconds 60
+uv run hands eval --dir "$TMPDIR/spatula-frames" --enable-export \
+  --seconds 60 --window-s 5
 ```
 
-Hold a hand up in view and keep it still for stretches of a second or two.
-The run records both sources against the same frames — the Mac's own output
-and, through `hands dump`, whatever the shell is currently feeding the gesture
-engine — and writes `results/eval-<timestamp>.json` plus a markdown summary
-comparing:
+Hold a hand up in view, keep it still for stretches of several seconds, and
+pinch a few times. The run writes `results/eval-<timestamp>.json` plus a
+markdown summary.
 
-- **jitter**, the mean distance a joint moves between frames while the wrist is
-  held still, which is motion you did not make and what makes a pinch
+It alternates 5 s windows. With injection **off**, `hands dump` returns the
+phone's own hands, so that window feeds the phone column. With injection
+**on**, the shell is acting on this tracker's joints, so that window feeds the
+mac column. Recording both columns in one window is what made the first
+version of this report unreadable: `hands dump` returns whatever the gesture
+engine is seeing, so with injection on the "phone" column was the Mac.
+
+The three numbers:
+
+- **jitter**, the mean distance a joint moves between frames while you are
+  holding still, which is motion you did not make and what makes a pinch
   threshold chatter;
 - **detect rate**, the fraction of frames each source had a hand at all;
-- **depth validity**, how much of the Mac's metric 3D is measured by the LiDAR
-  and how much is inferred from MediaPipe's hand model.
+- **thumb-index distance** at p10/p50/p90 while still. The gesture engine
+  fires a pinch under 25 mm, so a source whose resting hand reaches under that
+  is pinching by itself.
 
-Injection stays off during an eval by default, so the phone's hands remain the
-live source and the two columns are genuinely two trackers. `--inject` turns
-it on, and the report flags the run if the shell reported a mac source while
-recording.
+"Still" is one judgement about **you**, not about the source being scored: the
+phone track's wrist speed under 15 mm/s over half a second, bridged across the
+injection-on windows it is absent for. Both columns are then scored over the
+same wall-clock intervals. Judging each source on its own stillness excused a
+noisy source from being measured exactly where it was worst.
+
+`--inject` reverts to injecting for the whole run, which reproduces the old
+(meaningless) phone column and nothing else.
 
 ## How a landmark becomes a point in the room
 
 1. The backend gives 21 landmarks in the exported image's own pixels, already
    in MediaPipe order. MediaPipe also gives a `world` skeleton in metres
    centred on the hand; RTMPose does not.
-2. Each landmark medians a 5x5 patch of the depth map at its pixel, skipping
-   the `0` holes.
-3. A landmark with a reading unprojects through the intrinsics into camera
-   space. One without takes its **range** from a landmark that did get one
-   (wrist, else index MCP) and keeps its own measured direction. With
-   MediaPipe the world skeleton shapes that estimate, so the fingers keep
-   their relative depth; with RTMPose there is no hand model to shape it and
-   the estimate flattens to the reference landmark's own range. This is the
-   common case, not the exception: the depth map is a few dozen pixels across,
-   so a fingertip at arm's length is sub-pixel.
+2. The depth map answers **one** question: how far away is the hand? The
+   patches under the wrist and the four finger MCPs are pooled and medianed
+   together, and the result goes through a One Euro filter of its own, tuned
+   far harder than the joints (`--range-min-cutoff 0.4`, `--range-beta
+   0.005`). A hand's distance changes slowly; the LiDAR's ranging noise does
+   not.
+3. `handshape.py` turns that one range into 21. Each landmark keeps its own
+   pixel ray and gets a range from a hand whose bones have known lengths,
+   scaled per frame by the hand's apparent palm width. With RTMPose the palm
+   is one frontoparallel plate at the measured range and each finger segment
+   is solved outward — the distal landmark's ray meeting the sphere of the
+   bone's length around the proximal joint, taking the farther of the two
+   roots because a head-mounted camera sees the back of a raised hand and
+   curling carries a fingertip away. With MediaPipe the world skeleton already
+   knows the shape, so it is only scaled and slid until its palm centroid sits
+   at the measured range.
 4. The scene-frame head pose the shell stamped on the frame carries the point
    into the frame the panels live in.
-5. One Euro per axis per landmark removes the residual jitter, smoothing hard
-   while the hand is still and getting out of the way when it moves.
+5. One Euro per axis per landmark removes the residual jitter, and a two-frame
+   hold covers a dropped detection so the gesture engine never sees the hand
+   blink out for one frame.
+
+`--depth per-joint` is the older path, where every landmark medians a 5x5
+patch under itself and a landmark that missed takes the wrist's range. It is
+kept because it is what the default has to beat, and it loses badly. The
+exported map is 256x192 over a 1920x1440 capture, so one depth pixel covers
+7.5 capture pixels and a 5x5 patch spans about 14 mm of the scene at half a
+metre — wider than a finger. Every time the patch crosses the silhouette the
+median falls through to the wall behind the hand and the joint teleports by
+the depth of the room. That is not noise around the truth to be smoothed away,
+it is a different surface, which is why the fix is upstream of the filter.
 
 Frames, so nothing has to be guessed: image pixels have `v` pointing **down**;
 ARKit camera space is `+X` right, `+Y` up, `-Z` the view direction, with depth
@@ -173,7 +206,8 @@ being true silently.
 | `keypoints.py` | the RTMPose ↔ MediaPipe landmark tables |
 | `export_reader.py` | polling the shell's export directory, both formats |
 | `backends/` | the two models, behind one `detect(rgb, t_ns)` |
-| `tracker.py` | the depth fusion, the unprojection, the filter |
+| `handshape.py` | one measured range → 21, and the bone lengths it uses |
+| `tracker.py` | the range measurement, the unprojection, the filters, the hold |
 | `onefilter.py` | One Euro |
 | `control.py` | the shell's line protocol, including the message split |
 | `track.py` | the live loop |
@@ -185,7 +219,13 @@ being true silently.
 uv run pytest
 ```
 
-`test_keypoints.py` pins the RTMPose → MediaPipe mapping against rtmlib's own
+`test_handshape.py` builds a flat hand at half a metre, projects it, and
+insists the shape model puts every joint back where it was — same pixels, same
+bone lengths — from the one range; `test_tracker.py` drives the metric stage
+with a fixture backend, covering the hold and the silhouette case the rigid
+path exists for; `test_evaluate.py` pins the stillness windowing, including
+that a held frame is not credited with being steady. `test_keypoints.py` pins
+the RTMPose → MediaPipe mapping against rtmlib's own
 installed keypoint table, so a version bump that renumbers fails there rather
 than swapping the user's fingers in silence; `test_export_reader.py` pins the
 raw frame format, including that a short file is refused rather than reshaped.
@@ -205,24 +245,21 @@ at a mirror, which is right for a selfie camera and backwards for the phone's
 rear camera. The label is flipped by default; `--no-flip-handedness` keeps it
 as MediaPipe gave it.
 
-**The depth, when the hand is not flat.** RTMPose says nothing, so the
-geometry has to. The palm plane is spanned by (index MCP − wrist) and
-(pinky MCP − wrist); in a right-handed frame their cross product points out of
-the palm for a right hand and out of the back for a left one, and the thumb is
-anatomically always on the palmar side. So the sign of the thumb's offset
-along that normal is the answer. This is the same test the gesture engine's
-`ge_hand_chirality` runs (`gesture-engine/src/ge_features.cpp`), down to
-averaging the thumb MCP, IP and TIP rather than trusting one of them.
-
-**The picture, when it is.** The test above needs the thumb to stand off the
-palm in MEASURED depth, and most landmarks miss the LiDAR map and inherit one
-range — so a hand that came back flat says nothing, which is the common case
-rather than the corner one. The image then decides it: the signed area of
+**The picture, otherwise.** The signed area of
 (index MCP − wrist) × (pinky MCP − wrist) in pixels fixes the order of the
 knuckles around the wrist, which is rotation-invariant and flips under a
 mirror. That one number cannot separate a right hand seen palm-on from a left
 hand seen back-on, so it takes one bit of outside knowledge: the phone is on
 the user's head, so a hand raised to point at a panel is seen from the BACK.
-`--palmar-view` is the other assumption. A hand that is edge-on in both the
-depth and the picture is dropped rather than guessed, and the shell's last
-good hand ages out on its own 150 ms clock.
+`--palmar-view` is the other assumption. A hand that is edge-on in the picture
+is dropped rather than guessed, and the shell's last good hand ages out on its
+own 150 ms clock.
+
+There used to be a third test here, tried before the picture: the sign of the
+thumb's offset from the palm plane in measured depth, the same quantity the
+gesture engine's `ge_hand_chirality` computes
+(`gesture-engine/src/ge_features.cpp`). It is gone. Under the shape model the
+thumb's side of the palm plane is set by the *same* dorsal assumption the
+pixel test uses, so asking the joints would be asking the assumption to
+confirm itself. `chirality_from_joints` stays in `geometry.py` because the
+shell computes the same quantity and the two are pinned against each other.

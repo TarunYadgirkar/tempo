@@ -6,8 +6,12 @@ frame in metres, send them to the shell, repeat. Prints one line a second:
   28.4 fps | detect 0.94 | depth 0.71 | landmark  4.1 ms | e2e  38.4 ms
 
   detect     fraction of frames the model found at least one hand in
-  depth      fraction of landmarks that got a real LiDAR reading rather than
-             an estimated range
+  depth      fraction of landmarks that got a real LiDAR reading. Under the
+             default `--depth rigid` this is reporting only: the hand is
+             placed from one pooled palm range, not from these
+  held       frames in the last second where the model found nothing and the
+             previous hand was re-sent instead
+  range      the hand's smoothed distance from the camera
   landmark   how long the model itself took, per frame
   e2e        the instant the shell published the frame to the moment it acked
              the injection made from it — the number that decides whether a
@@ -37,6 +41,9 @@ class _Stats:
     def reset(self) -> None:
         self.frames = 0
         self.with_hand = 0
+        self.held = 0
+        self.range_m = 0.0
+        self.range_n = 0
         self.depth_valid = 0.0
         self.landmark_s = 0.0
         self.e2e_s = 0.0
@@ -50,6 +57,9 @@ class _Stats:
             f"{self.frames / dt:5.1f} fps | "
             f"detect {self.with_hand / n:.2f} | "
             f"depth {self.depth_valid / n:.2f} | "
+            f"held {self.held:2d} | "
+            + (f"range {self.range_m / self.range_n:.2f} m | " if self.range_n else "")
+            + 
             f"landmark {1000 * self.landmark_s / n:5.1f} ms | "
             + (
                 f"e2e {1000 * self.e2e_s / self.e2e_n:6.1f} ms"
@@ -119,7 +129,12 @@ def run_track(args) -> int:
                     break
 
                 stats.frames += 1
-                stats.with_hand += 1 if result.hands else 0
+                stats.with_hand += 1 if result.live else 0
+                stats.held += 1 if (result.hands and not result.live) else 0
+                for hand in result.live:
+                    if hand.range_m > 0.0:
+                        stats.range_m += hand.range_m
+                        stats.range_n += 1
                 stats.depth_valid += result.depth_valid_fraction
                 stats.landmark_s += landmark_s
                 # export_ns is stamped by the shell on THIS Mac's realtime
