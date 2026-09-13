@@ -204,8 +204,10 @@ class scene {
     // hands come straight back, so a tracker that dies degrades instead of
     // freezing the user's hands in mid-air.
     bool hands_inject(const std::string &json, std::string &err);
-    // "source=phone|mac age_ms=<n>" for `hands status`. age_ms is the age of
-    // the last injection (0 when there has never been one).
+    // "source=phone|mac age_ms=<n> e2e_ms=<n>" for `hands status`. age_ms is
+    // the age of the last injection (0 when there has never been one);
+    // e2e_ms is that injection's frame-export instant to now, both on this
+    // Mac's realtime clock, or -1 when the tracker sent no frame stamp.
     std::string hands_source_status() const;
     // `hands dump`: the joints the gesture engine is seeing right now, in
     // SB_JOINT_* order and the scene frame, tagged with which source they

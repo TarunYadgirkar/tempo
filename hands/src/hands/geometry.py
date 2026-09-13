@@ -28,13 +28,23 @@ import numpy as np
 MEDIAPIPE_TO_SB = tuple(range(21))
 
 WRIST = 0
+THUMB_MCP = 2
+THUMB_IP = 3
 THUMB_TIP = 4
 INDEX_MCP = 5
 INDEX_TIP = 8
 MIDDLE_TIP = 12
 RING_TIP = 16
+PINKY_MCP = 17
 PINKY_TIP = 20
 FINGERTIPS = (THUMB_TIP, INDEX_TIP, MIDDLE_TIP, RING_TIP, PINKY_TIP)
+
+# Below this, the thumb is close enough to the palm plane that its side of it
+# is noise. Measured in palm widths, so it does not care about hand size.
+CHIRALITY_MIN_OFFSET = 0.05
+# Below this, the palm is edge-on in the image and the knuckles do not order
+# left to right at all. Measured in palm widths squared, for the same reason.
+CHIRALITY_MIN_AREA = 0.05
 
 
 @dataclass(frozen=True)
@@ -131,6 +141,76 @@ def camera_to_scene(
 ) -> np.ndarray:
     """Camera-space point -> scene frame, given the camera's scene-frame pose."""
     return np.asarray(cam_pos, dtype=np.float64) + quat_rotate(cam_quat, p_cam)
+
+
+def chirality_from_joints(joints: np.ndarray) -> str | None:
+    """"left" / "right" from the geometry, or None when it is too close to call.
+
+    RTMPose gives 21 points and no handedness, so the hand has to say which it
+    is. The palm plane is spanned by (INDEX_MCP - WRIST) and
+    (PINKY_MCP - WRIST); in a right-handed frame their cross product points
+    out of the PALM for a right hand and out of the BACK for a left one, and
+    the thumb is anatomically always on the palmar side. So the sign of the
+    thumb's offset along that normal is the chirality, and its magnitude is
+    how sure the answer is.
+
+    This is the Python mirror of `palm_thumb_signed_offset` in
+    gesture-engine/src/ge_features.cpp, down to averaging the thumb MCP, IP and
+    TIP rather than using one of them: the CMC sits in the palm plane and only
+    dilutes the signal, and the average rides out the per-joint tracking noise.
+
+    The joints must be in a RIGHT-HANDED frame — the scene frame is one. Hand
+    it image pixels or a mirrored frame and every answer flips.
+    """
+    wrist = joints[WRIST]
+    normal = np.cross(joints[INDEX_MCP] - wrist, joints[PINKY_MCP] - wrist)
+    length = float(np.linalg.norm(normal))
+    palm_width = float(np.linalg.norm(joints[INDEX_MCP] - joints[PINKY_MCP]))
+    if length < 1e-9 or palm_width < 1e-6:
+        return None
+    thumb = (joints[THUMB_MCP] + joints[THUMB_IP] + joints[THUMB_TIP]) / 3.0
+    offset = float(np.dot(normal / length, thumb - wrist)) / palm_width
+    if abs(offset) < CHIRALITY_MIN_OFFSET:
+        return None
+    return "right" if offset > 0.0 else "left"
+
+
+def chirality_from_pixels(landmarks_px: np.ndarray, dorsal: bool = True) -> str | None:
+    """"left" / "right" from the image alone, given which face is turned to us.
+
+    Two dimensions cannot tell a left hand from a right one on their own: a
+    right hand seen palm-on and a left hand seen back-on project to the same
+    picture. What the image does decide is the ORDER of the knuckles around
+    the wrist, and one bit of outside knowledge settles the rest.
+
+    The bit is `dorsal`. The phone sits on the user's head and looks where
+    they look, so a hand raised to point at a panel is seen from the back —
+    dorsal, the default. `dorsal=False` is the selfie-style palm-on view.
+
+    Derivation, in image pixels (u right, v DOWN):
+      s = cross_z(INDEX_MCP - WRIST, PINKY_MCP - WRIST)
+    For a RIGHT hand held fingers-up with the palm toward the camera, the
+    index knuckle is left of the pinky knuckle and both are above the wrist,
+    so a = (-, -) and b = (+, -) and s = ax*by - ay*bx > 0. Rotating the hand
+    in the image plane cannot change that sign, and mirroring it — the other
+    hand, or the other face — is exactly what does. So s > 0 means a right
+    hand seen palmar or a left hand seen dorsal, and s < 0 the reverse.
+
+    None when the palm is edge-on, where the knuckles no longer order.
+    """
+    wrist = landmarks_px[WRIST]
+    a = landmarks_px[INDEX_MCP] - wrist
+    b = landmarks_px[PINKY_MCP] - wrist
+    palm_width = float(np.linalg.norm(landmarks_px[INDEX_MCP] - landmarks_px[PINKY_MCP]))
+    if palm_width < 1e-6:
+        return None
+    area = float(a[0] * b[1] - a[1] * b[0]) / (palm_width * palm_width)
+    if abs(area) < CHIRALITY_MIN_AREA:
+        return None
+    palmar_answer = "right" if area > 0.0 else "left"
+    if not dorsal:
+        return palmar_answer
+    return "left" if palmar_answer == "right" else "right"
 
 
 def sample_depth(

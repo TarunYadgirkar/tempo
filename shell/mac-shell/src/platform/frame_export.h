@@ -12,8 +12,18 @@
 // Files, all rewritten in place at up to FRAME_EXPORT_MAX_HZ:
 //
 //   <dir>/latest.jpg     the camera image, re-encoded from the decoded RGBA
+//   <dir>/latest.rgb     RAW MODE instead: uint8 RGB, row-major, no header
 //   <dir>/latest.depth   raw float32 metres, row-major, 0 = no reading
 //   <dir>/latest.json    the sidecar (below)
+//
+// Raw mode (`frame-export on <dir> --raw`) exists because the JPEG is decoded
+// again immediately: the shell spends milliseconds encoding one and the
+// tracker spends more decoding it, to hand the detector back the pixels the
+// shell already had. Raw mode writes those pixels straight out, downscaled to
+// at most FRAME_EXPORT_RAW_MAX_WIDTH so the bytes stay cheap and the detector
+// gets the size it wants anyway. The intrinsics are unaffected: they are in
+// ARKit capture pixels and a consumer already rescales by image_width/width,
+// so the downscale costs nothing but pixels nobody was going to use.
 //
 // Each is written to a temp file in the same directory and rename()d into
 // place, so a reader never sees a half-written file. The JSON is renamed
@@ -23,7 +33,9 @@
 // Sidecar shape:
 //   {"t_ns":<frame timestamp, ns since the Unix epoch>,
 //    "seq":<monotonic export counter>,
-//    "image":{"width":w,"height":h,"file":"latest.jpg"},
+//    "export_ns":<CLOCK_REALTIME on THIS Mac when the frame was published>,
+//    "image":{"width":w,"height":h,"file":"latest.jpg","format":"jpeg"}
+//             | {"width":w,"height":h,"file":"latest.rgb","format":"rgb8"},
 //    "head":{"frame":"scene","pos":[x,y,z],"quat":[x,y,z,w]} | null,
 //    "intrinsics":{"fx":..,"fy":..,"cx":..,"cy":..,
 //                  "image_width":..,"image_height":..} | null,
@@ -33,9 +45,15 @@
 // `head` is null before a world origin is captured, `intrinsics` null until
 // the first 0x0A packet, `depth` null until the first 0x0B — a consumer must
 // handle all three, because a run can legitimately have colour and nothing
-// else. The intrinsics are in ARKit capture pixels, which are NOT the JPEG's
-// pixels; scale by image_width/width (core/hand_inject.h unproject_pixel does
-// exactly this).
+// else. The intrinsics are in ARKit capture pixels, which are NOT the exported
+// image's pixels; scale by image_width/width (core/hand_inject.h
+// unproject_pixel does exactly this).
+//
+// `t_ns` is the phone's capture clock and `export_ns` this Mac's. Subtracting
+// one from the other measures a clock offset, not a latency; the pair that
+// means something is `export_ns` against this Mac's clock at a later stage,
+// which is what `hands-inject`'s `frame_t_ns` carries back for `hands status`
+// to report as `e2e_ms`.
 
 #pragma once
 
@@ -50,9 +68,15 @@ namespace mac_shell {
 
 class scene;
 
-// The phone streams ~30 Hz; MediaPipe on the Mac keeps up with about half
-// that, and re-encoding a JPEG per frame is not free. 15 Hz is the cap.
-constexpr int FRAME_EXPORT_MAX_HZ = 15;
+// The phone streams ~30 Hz and raw mode means the exporter no longer has to
+// re-encode a JPEG to publish a frame, so the cap is the stream rate. Gating
+// below it added up to 66 ms of pure waiting to every gesture.
+constexpr int FRAME_EXPORT_MAX_HZ = 30;
+
+// Raw frames are downscaled to at most this wide. Both hand pipelines feed
+// their detector a few hundred pixels square, so anything past this is bytes
+// written and read for a resize that happens anyway.
+constexpr int FRAME_EXPORT_RAW_MAX_WIDTH = 640;
 
 class frame_export {
    public:
@@ -60,9 +84,10 @@ class frame_export {
     // must resolve inside $TMPDIR or $HOME — the control socket is reachable
     // by anything running as the user, and this verb is a file-write
     // primitive. On refusal returns false with a one-word `err`.
-    bool enable(const std::string &dir, std::string &err);
+    bool enable(const std::string &dir, bool raw, std::string &err);
     void disable();
-    // "on dir=<path> frames=<n> hz=<cap>" / "off frames=<n>".
+    // "on dir=<path> frames=<n> hz=<cap> format=jpeg|rgb8" /
+    // "off frames=<n>".
     std::string status() const;
     // Cheap enough to call per rendered frame before decoding anything.
     bool enabled() const { return enabled_.load(std::memory_order_relaxed); }
@@ -70,7 +95,7 @@ class frame_export {
     // Publish one decoded camera frame. Pulls the matching depth map and the
     // pose at the frame's timestamp from `world`, and the intrinsics from
     // `rx` (which is latest-wins, so reading it here does not starve the
-    // renderer). Silently returns when export is off or the 15 Hz gate has
+    // renderer). Silently returns when export is off or the rate gate has
     // not opened; failures are logged once per transition, never fatal.
     void offer_frame(const sb_frame_t &frame, const scene &world,
                      sb_receiver_t *rx);
@@ -79,6 +104,7 @@ class frame_export {
     std::atomic<bool> enabled_{false};
     mutable std::mutex mutex_;
     std::string dir_;
+    bool raw_ = false;
     uint64_t frames_ = 0;
     uint64_t last_write_ns_ = 0;
     bool warned_ = false;
@@ -90,8 +116,12 @@ class frame_export {
 // threading a pointer between them buys nothing over naming the same object.
 frame_export &frame_export_instance();
 
-// Handler body for the `frame-export on <dir> | off | status` verb. Split out
-// so main.cpp's wiring is one line and the verb's grammar is tested here.
+// Handler body for the
+// `frame-export on <dir> [--raw|raw=1] | off | status` verb. Split out so
+// main.cpp's wiring is one line and the verb's grammar is tested here. The
+// raw flag is a trailing token, so a directory whose last path component is
+// literally `--raw` or `raw=1` cannot be named — which beats a quoting
+// grammar on a line-oriented socket.
 bool frame_export_verb(frame_export &fx, const std::string &arg,
                        std::string &reply, std::string &err);
 

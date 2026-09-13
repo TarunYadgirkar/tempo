@@ -65,12 +65,16 @@ class ShellControl:
         return self.request("version")
 
     def hands_status(self) -> dict:
-        """`hands status` -> {"overlay": .., "source": .., "age_ms": ..}."""
+        """`hands status` -> {"overlay", "source", "age_ms", "e2e_ms"}.
+
+        `e2e_ms` is -1 when the shell holds no injection carrying a frame
+        stamp, so it is signed and the parse has to admit a leading minus.
+        """
         reply = self.request("hands status")
         out: dict[str, str | int] = {}
         for token in reply.removeprefix("ok ").split():
             key, _, value = token.partition("=")
-            out[key] = int(value) if value.isdigit() else value
+            out[key] = int(value) if value.lstrip("-").isdigit() else value
         return out
 
     def hands_dump(self) -> dict:
@@ -80,8 +84,13 @@ class ShellControl:
             raise ShellError(reply)
         return json.loads(reply[3:])
 
-    def frame_export_on(self, directory: str) -> str:
-        reply = self.request(f"frame-export on {directory}")
+    def frame_export_on(self, directory: str, raw: bool = False) -> str:
+        """Turn the export on. `raw` publishes latest.rgb (decoded pixels,
+        downscaled by the shell) instead of a JPEG this process would have to
+        decode again."""
+        reply = self.request(
+            f"frame-export on {directory}" + (" --raw" if raw else "")
+        )
         if not reply.startswith("ok "):
             raise ShellError(reply)
         return reply
@@ -89,25 +98,32 @@ class ShellControl:
     def frame_export_off(self) -> str:
         return self.request("frame-export off")
 
-    def inject_hands(self, t_ms: int, hands: list[dict]) -> None:
+    def inject_hands(
+        self, t_ms: int, hands: list[dict], frame_t_ns: int = 0
+    ) -> None:
         """Send `hands-inject`, splitting when two hands overflow the line.
 
         `hands` entries are {"chirality", "confidence", "joints"} with joints
         as a (21, 3) array of scene-frame metres in MediaPipe landmark order.
         An empty list is the explicit "no hands in view", which retracts both.
+
+        `frame_t_ns` is the `export_ns` of the frame these joints came from,
+        echoed back so `hands status` can report export -> injection on the
+        shell's own clock. 0 omits it, and the shell then reports no latency
+        rather than an invented one.
         """
-        for payload in self._payloads(t_ms, hands):
+        for payload in self._payloads(t_ms, hands, frame_t_ns):
             reply = self.request(f"hands-inject {payload}")
             if not reply.startswith("ok"):
                 raise ShellError(reply)
 
     @staticmethod
-    def _payloads(t_ms: int, hands: list[dict]) -> list[str]:
+    def _payloads(t_ms: int, hands: list[dict], frame_t_ns: int = 0) -> list[str]:
         encoded = [_encode_hand(h) for h in hands]
-        whole = _wrap(t_ms, encoded)
+        whole = _wrap(t_ms, encoded, frame_t_ns)
         if len(whole) + len("hands-inject ") <= MAX_LINE or not encoded:
             return [whole]
-        return [_wrap(t_ms, [one]) for one in encoded]
+        return [_wrap(t_ms, [one], frame_t_ns) for one in encoded]
 
 
 def _encode_hand(hand: dict) -> str:
@@ -122,8 +138,11 @@ def _encode_hand(hand: dict) -> str:
     )
 
 
-def _wrap(t_ms: int, encoded: list[str]) -> str:
-    return '{{"t":{t},"hands":[{h}]}}'.format(t=int(t_ms), h=",".join(encoded))
+def _wrap(t_ms: int, encoded: list[str], frame_t_ns: int = 0) -> str:
+    stamp = f',"frame_t_ns":{int(frame_t_ns)}' if frame_t_ns else ""
+    return '{{"t":{t}{s},"hands":[{h}]}}'.format(
+        t=int(t_ms), s=stamp, h=",".join(encoded)
+    )
 
 
 def _default_sock() -> str:

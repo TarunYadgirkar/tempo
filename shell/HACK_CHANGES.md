@@ -212,3 +212,116 @@ The tracker itself lives in `hands/` (its own uv project, Python 3.12,
 mediapipe 0.10.21) with `uv run hands track` and `uv run hands eval`; see
 `hands/README.md`. `hands/tests/` re-asserts the same unprojection numbers in
 Python, so the two halves of that math keep agreeing.
+
+---
+
+## RTMPose hand tracking, and cutting the transport latency
+
+The Mac path worked but felt bad: 8-10 fps end to end with about 250 ms of
+lag, and MediaPipe's 2020 hand model wandering under it. Two separate causes,
+fixed separately.
+
+### The model: `--backend rtmpose|mediapipe`
+
+`hands track` and `hands eval` now take `--backend`, defaulting to `rtmpose`.
+It runs OpenMMLab's RTMDet-nano hand detector and RTMPose-m hand through
+`rtmlib` on ONNX Runtime — no mmcv, no PyTorch, and the two ONNX models
+download themselves into `~/.cache/rtmlib` on first use. `mediapipe` is the
+original path, kept so the two can be measured over the same frames.
+
+Per frame of a 640x480 export on this Mac: rtmpose 5.7 ms against mediapipe's
+11.3 ms, whole loop 7.3 ms against 12.6 ms. Two things buy that. The pose
+model runs on the CoreML execution provider (3.7 ms against 12.8 ms on the
+CPU); the DETECTOR cannot, because its ONNX export carries grid-decode ops
+whose static shapes CoreML infers at a different rank and ONNX Runtime raises
+mid-inference rather than falling back, so it stays on the CPU at 6.1 ms and a
+CoreML session that fails to construct or to run once drops to the CPU with a
+printed line. And the detector is not run every frame: a hand found last frame
+is looked for inside its own grown box, with a detection forced every
+`--det-interval` frames (10), when the pose score drops, or when nothing was
+tracked.
+
+**Landmark order.** rtmlib's hand21 is wrist, thumb1..4, forefinger1..4, then
+middle, ring and pinky 1..4 — the COCO-WholeBody hand block, which enumerates
+the same skeleton in the same sequence as MediaPipe and as `SB_JOINT_*`. So
+that mapping is the identity too. `hands/src/hands/keypoints.py` writes it out
+as a table beside both sets of names, and `hands/tests/test_keypoints.py`
+checks it against rtmlib's own installed `hand21` keypoint table — including
+that `thumb1` links to the wrist, which is what makes it the CMC rather than
+the MCP and would otherwise shift the whole thumb by one joint.
+
+**Handedness.** RTMPose gives no chirality, so the geometry supplies it.
+First the same test the gesture engine runs: the palm plane from
+(index MCP − wrist) × (pinky MCP − wrist), and the sign of the thumb's offset
+along that normal, since the thumb is anatomically always palmar
+(`palm_thumb_signed_offset`, `gesture-engine/src/ge_features.cpp`). That needs
+the thumb to stand off the palm in MEASURED depth, and most landmarks miss the
+32x24 LiDAR map and inherit the reference landmark's range — so a hand that
+came back flat is undecidable, which is the common case rather than the corner
+one. The picture then decides it: the signed area of the same two palm vectors
+in pixels fixes the order of the knuckles around the wrist, which survives
+rotation and flips under a mirror. That cannot separate a right hand seen
+palm-on from a left hand seen back-on, so it takes one assumption — the phone
+is head-mounted, so a raised hand is seen from the BACK; `--palmar-view` is the
+other. Edge-on in both is dropped rather than guessed.
+
+The LiDAR unprojection, the scene transform and the One Euro stage are shared:
+the backends live behind `hands/src/hands/backends/`, whose whole contract is
+one frame in and 21 pixel landmarks out, so swapping the model cannot change
+the metric pipeline under it. What does differ is the depth fallback —
+MediaPipe's metric `world` skeleton shapes the estimated range of a landmark
+that missed the LiDAR, and RTMPose has no hand model to shape it with, so the
+estimate flattens to the reference landmark's own range.
+
+### The transport: 30 Hz, raw frames, and a latency that is finally reported
+
+- **`FRAME_EXPORT_MAX_HZ` 15 -> 30.** The phone streams at 30 and the gate was
+  holding half of them, which is up to 66 ms of pure waiting on every gesture.
+- **`frame-export on <dir> --raw`** (or `raw=1`) publishes `latest.rgb`:
+  uint8 RGB, row-major, no header, box-averaged down to at most 640 wide,
+  instead of `latest.jpg`. The shell was encoding a JPEG out of pixels it
+  already had so that the tracker could decode them again; the sidecar's
+  `image` object grows a `"format":"jpeg"|"rgb8"` and the status line grows
+  `format=`. The intrinsics are untouched — they are in ARKit capture pixels
+  and every consumer already rescales by `image_width/width`, so the downscale
+  costs only pixels nobody was going to use. The flag is a trailing token, so
+  a directory whose last component is literally `--raw` cannot be named, which
+  beats a quoting grammar on a line-oriented socket.
+- **Polling is on `os.stat`,** not on the sidecar's contents, with a 2 ms
+  sleep rather than 5 ms. Re-reading and re-parsing the JSON every few
+  milliseconds at 30 Hz was most of a core spent learning nothing.
+- **`e2e` is a number now, not `n/a`.** The sidecar carries `export_ns`, this
+  Mac's `CLOCK_REALTIME` at the instant the frame was published;
+  `hands-inject` takes an optional `frame_t_ns` echoing it back; and
+  `hands status` reports `e2e_ms=<n>` alongside `age_ms`, or `-1` when the
+  held injection carries no stamp. Both ends are one clock on one machine.
+  The frame's own `t_ns` is the PHONE's capture clock, and the old line
+  subtracted the two, so it was measuring a clock offset and discarding the
+  result as implausible.
+
+Measured on a synthetic 30 Hz export (a drawn hand, a LiDAR-shaped depth map
+with readings on the palm only) against a headless shell on
+`$TMPDIR/tempo-rtm.sock`: **30.0 fps, detect 1.00, depth 0.78, landmark 5.7 ms,
+e2e 7.3 ms**, against mediapipe's 11.3 ms / 12.6 ms over the same frames.
+Reading the raw file rather than decoding the JPEG is 0.09 ms against 0.52 ms
+per frame on the Python side; the encode it saves on the shell's side is the
+larger half and is not measured here, because it needs a live phone.
+
+Files: `hands/src/hands/backends/{__init__,mediapipe_backend,rtmpose_backend}.py`
+(new), `hands/src/hands/keypoints.py` (new), `hands/src/hands/{tracker,
+export_reader,geometry,control,cli,track,evaluate}.py`,
+`mac-shell/src/platform/frame_export.{h,mm}`,
+`mac-shell/src/core/hand_inject.{h,cpp}`, `mac-shell/src/core/scene.{h,cpp}`.
+
+Tests: `hands/tests/test_keypoints.py` pins the RTMPose landmark mapping
+against rtmlib's own installed table and both chirality tests, including that
+an edge-on hand is refused rather than guessed;
+`hands/tests/test_export_reader.py` pins the raw frame format, that a short
+file is refused rather than reshaped, that a pre-raw sidecar still reads as a
+JPEG with no export clock, and that the mtime poll yields each frame once.
+`mac-shell/tests/test_hands_e2e.cpp` grows a raw-mode section (`format=rgb8`,
+`latest.rgb` exactly width x height x 3, no `latest.jpg`) and pins `e2e_ms`
+over the socket; `test_hand_inject.cpp` pins the `frame_t_ns` parse, its
+refusals, that "no hands in view" retracts the stamp with the hands, and that
+the nanosecond stamp survives its round trip through a JSON double to within
+~256 ns. 45 pytest and 31 ctest, all green.

@@ -3,14 +3,17 @@
 Read the newest exported frame, find the landmarks, put them in the scene
 frame in metres, send them to the shell, repeat. Prints one line a second:
 
-  12.8 fps | detect 0.94 | depth 0.71 | landmark 41.2 ms | e2e 88.4 ms
+  28.4 fps | detect 0.94 | depth 0.71 | landmark  4.1 ms | e2e  38.4 ms
 
-  detect     fraction of frames MediaPipe found at least one hand in
+  detect     fraction of frames the model found at least one hand in
   depth      fraction of landmarks that got a real LiDAR reading rather than
              an estimated range
   landmark   how long the model itself took, per frame
-  e2e        the phone's capture timestamp to the moment the shell acked the
-             injection — the number that decides whether a pinch feels live
+  e2e        the instant the shell published the frame to the moment it acked
+             the injection made from it — the number that decides whether a
+             pinch feels live. Both stamps are this Mac's realtime clock; the
+             frame's own capture timestamp is the phone's, and subtracting
+             one from the other would measure a clock offset instead.
 """
 
 from __future__ import annotations
@@ -20,10 +23,10 @@ import time
 
 from .control import ShellControl, ShellError
 from .export_reader import ExportReader
-from .tracker import HandTracker
+from .tracker import tracker_from_args
 
-# Past this, the frame's timestamp is on a different clock (a replayed
-# fixture's invented epoch), not a pipeline that is genuinely this far behind.
+# Past this, the frame's stamp is on a different clock (a replayed fixture's
+# invented epoch), not a pipeline that is genuinely this far behind.
 MAX_PLAUSIBLE_LAG_S = 5.0
 
 
@@ -75,22 +78,19 @@ def run_track(args) -> int:
     started_export = False
     try:
         if args.enable_export:
-            print(shell.frame_export_on(args.dir), flush=True)
+            print(shell.frame_export_on(args.dir, raw=args.raw), flush=True)
             started_export = True
 
         reader = ExportReader(args.dir)
         stats = _Stats()
         deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
 
-        with HandTracker(
-            model_path=args.model,
-            flip_handedness=args.flip_handedness,
-            depth_window=args.depth_window,
-            min_cutoff=args.min_cutoff,
-            beta=args.beta,
-            fallback_depth_m=args.fallback_depth_m,
-        ) as tracker:
-            print(f"tracking {args.dir} -> {shell.path}", flush=True)
+        with tracker_from_args(args) as tracker:
+            print(
+                f"tracking {args.dir} -> {shell.path} "
+                f"[{tracker.backend_name}]",
+                flush=True,
+            )
             while not stop and (deadline is None or time.monotonic() < deadline):
                 frame = reader.wait(timeout_s=1.0)
                 if frame is None:
@@ -111,7 +111,9 @@ def run_track(args) -> int:
                 ]
                 now_ms = int(time.time() * 1000)
                 try:
-                    shell.inject_hands(now_ms, payload)
+                    shell.inject_hands(
+                        now_ms, payload, frame_t_ns=frame.export_ns
+                    )
                 except ShellError as exc:
                     print(f"hands: inject refused: {exc}", flush=True)
                     break
@@ -120,13 +122,13 @@ def run_track(args) -> int:
                 stats.with_hand += 1 if result.hands else 0
                 stats.depth_valid += result.depth_valid_fraction
                 stats.landmark_s += landmark_s
-                # The frame's own timestamp is the phone's wall clock, the
-                # same clock time.time() reads here, so the difference is the
-                # real capture-to-injection latency and not a clock offset.
-                # A replayed fixture carries a made-up epoch, which would
-                # otherwise be reported as a 25-year latency; anything past a
+                # export_ns is stamped by the shell on THIS Mac's realtime
+                # clock, the same clock time.time() reads here, so the
+                # difference is the pipeline's own latency and not a clock
+                # offset. A sidecar from a shell too old to carry one leaves
+                # it at 0, which would read as a 56-year lag; anything past a
                 # few seconds is a different clock, not a slow pipeline.
-                lag = time.time() - frame.t_ns / 1e9
+                lag = time.time() - frame.export_ns / 1e9
                 if 0.0 <= lag <= MAX_PLAUSIBLE_LAG_S:
                     stats.e2e_s += lag
                     stats.e2e_n += 1

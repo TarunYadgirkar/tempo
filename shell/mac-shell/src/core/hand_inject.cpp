@@ -158,6 +158,19 @@ bool parse_hands_inject(const std::string &json, injected_hands &out,
     }
     out.t_ms = (uint64_t)t->number;
 
+    // Optional: the `export_ns` the sidecar carried, echoed back so
+    // `hands status` can report export -> injection on one clock. Carried as
+    // a JSON number, so it rounds to the nearest ~256 ns at present-day epoch
+    // values — four orders of magnitude below the millisecond it is reported
+    // in.
+    if (const json_value *f = root.find("frame_t_ns")) {
+        if (!f->is_number() || !(f->number >= 0.0) || !std::isfinite(f->number)) {
+            err = "frame_t_ns must be a non-negative nanosecond timestamp";
+            return false;
+        }
+        out.frame_t_ns = (uint64_t)f->number;
+    }
+
     const json_value *hands = root.find("hands");
     if (!hands || !hands->is_array()) {
         err = "hands must be an array";
@@ -191,6 +204,8 @@ void hand_inject_store::set(const injected_hands &h) {
         // the last pose linger for another 150 ms.
         received_ms_[LEFT] = 0;
         received_ms_[RIGHT] = 0;
+        frame_t_ns_[LEFT] = 0;
+        frame_t_ns_[RIGHT] = 0;
         return;
     }
     for (int i = 0; i < h.count; i++) {
@@ -198,6 +213,7 @@ void hand_inject_store::set(const injected_hands &h) {
         hands_[slot] = h.hands[i];
         hands_[slot].hand_index = (uint8_t)slot;
         received_ms_[slot] = now;
+        frame_t_ns_[slot] = h.frame_t_ns;
     }
 }
 
@@ -222,6 +238,22 @@ uint64_t hand_inject_store::age_ms(uint64_t now_ms) const {
         }
     }
     return best;
+}
+
+int64_t hand_inject_store::e2e_ms(uint64_t now_ms) const {
+    // The freshest hand is the one whose latency is current; an older slot
+    // would report the age of a hand that has since left the frame.
+    int best_slot = -1;
+    for (int slot = 0; slot < 2; slot++) {
+        if (received_ms_[slot] == 0 || frame_t_ns_[slot] == 0)
+            continue;
+        if (best_slot < 0 || received_ms_[slot] > received_ms_[best_slot])
+            best_slot = slot;
+    }
+    if (best_slot < 0)
+        return -1;
+    const uint64_t frame_ms = frame_t_ns_[best_slot] / 1000000ull;
+    return now_ms <= frame_ms ? 0 : (int64_t)(now_ms - frame_ms);
 }
 
 bool hand_inject_store::fresh(uint64_t now_ms) const {

@@ -37,6 +37,12 @@ struct cf_guard {
     }
 };
 
+uint64_t realtime_ns() {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
 uint64_t steady_ns() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -74,6 +80,51 @@ bool atomic_write(const std::string &dir, const char *name,
         return false;
     }
     return true;
+}
+
+// RGBA -> packed RGB, box-averaged down to at most `max_w` wide. A box
+// average rather than nearest: the detector is looking at edges, and dropping
+// three pixels in four turns a finger against a busy background into aliasing
+// the model was never trained on. One pass over the source either way.
+void downscale_rgb(const uint8_t *rgba, int width, int height, int max_w,
+                   std::vector<uint8_t> &out, int &out_w, int &out_h) {
+    out_w = width;
+    out_h = height;
+    if (max_w > 0 && width > max_w) {
+        out_w = max_w;
+        out_h = (int)((int64_t)height * max_w / width);
+        if (out_h < 1)
+            out_h = 1;
+    }
+    out.resize((size_t)out_w * (size_t)out_h * 3);
+    for (int y = 0; y < out_h; y++) {
+        const int sy0 = (int)((int64_t)y * height / out_h);
+        int sy1 = (int)((int64_t)(y + 1) * height / out_h);
+        if (sy1 <= sy0)
+            sy1 = sy0 + 1;
+        for (int x = 0; x < out_w; x++) {
+            const int sx0 = (int)((int64_t)x * width / out_w);
+            int sx1 = (int)((int64_t)(x + 1) * width / out_w);
+            if (sx1 <= sx0)
+                sx1 = sx0 + 1;
+            uint32_t acc[3] = {0, 0, 0};
+            uint32_t n = 0;
+            for (int sy = sy0; sy < sy1; sy++) {
+                const uint8_t *row = rgba + (size_t)sy * (size_t)width * 4;
+                for (int sx = sx0; sx < sx1; sx++) {
+                    const uint8_t *px = row + (size_t)sx * 4;
+                    acc[0] += px[0];
+                    acc[1] += px[1];
+                    acc[2] += px[2];
+                    n++;
+                }
+            }
+            uint8_t *dst = out.data() + ((size_t)y * (size_t)out_w + (size_t)x) * 3;
+            dst[0] = (uint8_t)(acc[0] / n);
+            dst[1] = (uint8_t)(acc[1] / n);
+            dst[2] = (uint8_t)(acc[2] / n);
+        }
+    }
 }
 
 bool encode_jpeg(const uint8_t *rgba, int width, int height,
@@ -128,7 +179,7 @@ void append_float(std::string &s, double v) {
 
 }  // namespace
 
-bool frame_export::enable(const std::string &dir, std::string &err) {
+bool frame_export::enable(const std::string &dir, bool raw, std::string &err) {
     if (dir.empty() || dir[0] != '/') {
         err = "not_absolute";
         return false;
@@ -152,6 +203,7 @@ bool frame_export::enable(const std::string &dir, std::string &err) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     dir_ = resolved.substr(0, slash);
+    raw_ = raw;
     frames_ = 0;
     last_write_ns_ = 0;
     warned_ = false;
@@ -171,9 +223,9 @@ std::string frame_export::status() const {
                       (unsigned long long)frames_);
         return buf;
     }
-    std::snprintf(buf, sizeof(buf), "on dir=%s frames=%llu hz=%d",
+    std::snprintf(buf, sizeof(buf), "on dir=%s frames=%llu hz=%d format=%s",
                   dir_.c_str(), (unsigned long long)frames_,
-                  FRAME_EXPORT_MAX_HZ);
+                  FRAME_EXPORT_MAX_HZ, raw_ ? "rgb8" : "jpeg");
     return buf;
 }
 
@@ -193,14 +245,20 @@ void frame_export::offer_frame(const sb_frame_t &frame, const scene &world,
     if (last_write_ns_ != 0 && now - last_write_ns_ < min_gap)
         return;
 
-    std::vector<uint8_t> jpeg;
-    if (!encode_jpeg(frame.rgba, (int)frame.width, (int)frame.height, jpeg)) {
+    std::vector<uint8_t> pixels;
+    int img_w = (int)frame.width, img_h = (int)frame.height;
+    if (raw_) {
+        downscale_rgb(frame.rgba, (int)frame.width, (int)frame.height,
+                      FRAME_EXPORT_RAW_MAX_WIDTH, pixels, img_w, img_h);
+    } else if (!encode_jpeg(frame.rgba, (int)frame.width, (int)frame.height,
+                            pixels)) {
         if (!warned_) {
             std::fprintf(stderr, "frame-export: JPEG encode failed\n");
             warned_ = true;
         }
         return;
     }
+    const char *image_file = raw_ ? "latest.rgb" : "latest.jpg";
 
     scene::depth_snapshot depth;
     const bool have_depth = world.snapshot_depth(0, depth) &&
@@ -225,16 +283,22 @@ void frame_export::offer_frame(const sb_frame_t &frame, const scene &world,
                           depth.depth.size() * sizeof(float)))
             return;
     }
-    if (!atomic_write(dir_, "latest.jpg", jpeg.data(), jpeg.size()))
+    if (!atomic_write(dir_, image_file, pixels.data(), pixels.size()))
         return;
 
     std::string json = "{\"t_ns\":";
     json += std::to_string((unsigned long long)frame.timestamp_ns);
     json += ",\"seq\":";
     json += std::to_string((unsigned long long)(frames_ + 1));
-    json += ",\"image\":{\"width\":" + std::to_string(frame.width);
-    json += ",\"height\":" + std::to_string(frame.height);
-    json += ",\"file\":\"latest.jpg\"}";
+    json += ",\"export_ns\":";
+    json += std::to_string((unsigned long long)realtime_ns());
+    json += ",\"image\":{\"width\":" + std::to_string(img_w);
+    json += ",\"height\":" + std::to_string(img_h);
+    json += ",\"file\":\"";
+    json += image_file;
+    json += "\",\"format\":\"";
+    json += raw_ ? "rgb8" : "jpeg";
+    json += "\"}";
 
     json += ",\"head\":";
     if (have_head) {
@@ -317,12 +381,23 @@ bool frame_export_verb(frame_export &fx, const std::string &arg,
         size_t i = 2;
         while (i < arg.size() && (arg[i] == ' ' || arg[i] == '\t'))
             i++;
-        const std::string dir = arg.substr(i);
+        std::string dir = arg.substr(i);
+        bool raw = false;
+        for (const char *flag : {" --raw", " raw=1"}) {
+            const size_t n = std::strlen(flag);
+            if (dir.size() > n && dir.compare(dir.size() - n, n, flag) == 0) {
+                raw = true;
+                dir.resize(dir.size() - n);
+                break;
+            }
+        }
+        while (!dir.empty() && (dir.back() == ' ' || dir.back() == '\t'))
+            dir.pop_back();
         if (dir.empty()) {
             err = "bad_path";
             return false;
         }
-        if (!fx.enable(dir, err))
+        if (!fx.enable(dir, raw, err))
             return false;
         reply = fx.status();
         return true;

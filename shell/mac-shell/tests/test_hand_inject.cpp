@@ -245,6 +245,45 @@ static void test_store_freshness() {
     CHECK(store.fresh(t0 + HAND_INJECT_FRESH_MS - 1));
     CHECK(!store.fresh(t0 + HAND_INJECT_FRESH_MS));
     CHECK(store.age_ms(t0 + 40) >= 40);
+    // A payload with no frame stamp must not invent a latency.
+    CHECK(store.e2e_ms(t0) == -1);
+}
+
+static void test_store_e2e() {
+    hand_inject_store store;
+    CHECK(store.e2e_ms(hand_inject_now_ms()) == -1);
+
+    const uint64_t now = hand_inject_now_ms();
+    injected_hands h;
+    std::string err;
+    std::string p = payload("right", 0.0f);
+    p.insert(p.find(",\"hands\""),
+             ",\"frame_t_ns\":" + std::to_string((now - 55) * 1000000ull));
+    CHECK(parse_hands_inject(p, h, err));
+    // A present-day epoch in nanoseconds needs 19 digits and JSON numbers are
+    // doubles, so the stamp comes back rounded to the nearest ~256 ns. That is
+    // four orders of magnitude under the millisecond it gets reported in, and
+    // pinning it here is what keeps someone from "fixing" the wire format.
+    const uint64_t want = (now - 55) * 1000000ull;
+    CHECK(h.frame_t_ns > want - 1024 && h.frame_t_ns < want + 1024);
+    store.set(h);
+    // Export -> injection, both on this machine's realtime clock. The store
+    // stamps `set` with its own now, so the floor is the 55 ms the payload
+    // claims and the ceiling is that plus however long this test took.
+    const int64_t e2e = store.e2e_ms(hand_inject_now_ms());
+    CHECK(e2e >= 55 && e2e < 5000);
+
+    // "no hands in view" retracts the stamp with the hands, so the next
+    // status reports no latency rather than the last one forever.
+    injected_hands empty;
+    CHECK(parse_hands_inject("{\"t\":1,\"hands\":[]}", empty, err));
+    store.set(empty);
+    CHECK(store.e2e_ms(hand_inject_now_ms()) == -1);
+
+    // A negative stamp is a refusal, not a clamp.
+    CHECK(!parse_hands_inject(
+        "{\"t\":1,\"frame_t_ns\":-1,\"hands\":[]}", empty, err));
+    CHECK(!err.empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +335,7 @@ int main() {
     test_camera_to_scene();
     test_parse();
     test_store_freshness();
+    test_store_e2e();
     test_scene_takeover();
 
     if (g_failures) {

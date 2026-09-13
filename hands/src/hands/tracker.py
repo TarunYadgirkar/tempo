@@ -1,18 +1,21 @@
-"""MediaPipe Hand Landmarker over the exported camera frames.
+"""Pixel landmarks -> scene-frame metric joints.
 
-One frame in, scene-frame metric joints out:
+The model that found the landmarks lives behind `backends/`; everything here
+is the same for both of them, which is the point of the split — swapping the
+model must not be able to change the metric pipeline underneath it.
 
-  1. HandLandmarker (VIDEO mode, 2 hands) finds the 21 landmarks as normalised
-     image coordinates, plus a `world` skeleton in metres whose origin is the
-     hand's own centre.
+  1. A backend finds the 21 landmarks in the exported image's own pixels,
+     already in MediaPipe landmark order.
   2. Each landmark samples the LiDAR depth map at its pixel — the median of a
      5x5 patch, skipping the 0 "no reading" holes.
   3. A landmark with depth unprojects through the intrinsics into camera
-     space. A landmark without takes its RANGE from the world skeleton,
-     relative to a landmark that did get depth, and keeps its own (accurate)
-     pixel direction. This matters constantly in practice: the LiDAR map is
-     32x24-ish, so a fingertip at arm's length covers well under a pixel and
-     lands in a hole whenever the hand is not filling the frame.
+     space. A landmark without takes its RANGE from a landmark that did get
+     depth, and keeps its own (accurate) pixel direction. This matters
+     constantly in practice: the LiDAR map is 32x24-ish, so a fingertip at
+     arm's length covers well under a pixel and lands in a hole whenever the
+     hand is not filling the frame. MediaPipe offers a metric hand skeleton
+     that makes the estimate a shaped one; RTMPose does not, and the estimate
+     flattens to the reference landmark's own range.
   4. The head pose the shell stamped on the frame carries the point into the
      scene frame, where the panels are.
   5. One Euro per axis per landmark takes out the residual jitter.
@@ -25,18 +28,26 @@ tracker produced them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
-import mediapipe as mp
 import numpy as np
-from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python import vision as mp_vision
 
+from .backends import (  # noqa: F401 (DEFAULT_MODEL is re-exported for the CLI)
+    DEFAULT_BACKEND,
+    DEFAULT_MODEL,
+    Detection,
+    make_backend,
+)
 from .export_reader import ExportedFrame
-from .geometry import INDEX_MCP, WRIST, camera_to_scene, sample_depth, unproject
+from .geometry import (
+    INDEX_MCP,
+    WRIST,
+    camera_to_scene,
+    chirality_from_joints,
+    chirality_from_pixels,
+    sample_depth,
+    unproject,
+)
 from .onefilter import JointFilter
-
-DEFAULT_MODEL = Path(__file__).resolve().parents[2] / "models" / "hand_landmarker.task"
 
 
 @dataclass
@@ -50,45 +61,31 @@ class TrackedHand:
 @dataclass
 class TrackResult:
     hands: list[TrackedHand]
-    detected: int  # hands MediaPipe found, before the metric stage could drop any
+    detected: int  # hands the model found, before the metric stage could drop any
     depth_valid_fraction: float  # over the fingertips of the hands that survived
 
 
 class HandTracker:
     def __init__(
         self,
-        model_path: str | Path = DEFAULT_MODEL,
-        num_hands: int = 2,
-        min_detection_confidence: float = 0.5,
-        min_tracking_confidence: float = 0.5,
-        flip_handedness: bool = True,
+        backend: str = DEFAULT_BACKEND,
         depth_window: int = 5,
         min_cutoff: float = 1.0,
         beta: float = 0.5,
         fallback_depth_m: float = 0.0,
+        dorsal_view: bool = True,
+        **backend_kwargs,
     ):
-        model_path = Path(model_path)
-        if not model_path.is_file():
-            raise FileNotFoundError(
-                f"{model_path} is missing — run hands/scripts/fetch-model.sh"
-            )
-        options = mp_vision.HandLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=str(model_path)),
-            running_mode=mp_vision.RunningMode.VIDEO,
-            num_hands=num_hands,
-            min_hand_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence,
-        )
-        self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
-        self._flip = flip_handedness
+        self.backend_name = backend
+        self._backend = make_backend(backend, **backend_kwargs)
         self._window = depth_window
         self._fallback_depth = fallback_depth_m
+        self._dorsal = dorsal_view
         self._filters: dict[str, JointFilter] = {}
         self._filter_params = (min_cutoff, beta)
-        self._last_ts_ms = -1
 
     def close(self) -> None:
-        self._landmarker.close()
+        self._backend.close()
 
     def __enter__(self):
         return self
@@ -99,32 +96,22 @@ class HandTracker:
     # -- the loop body -----------------------------------------------------
 
     def track(self, frame: ExportedFrame) -> TrackResult:
-        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame.rgb)
-        # VIDEO mode insists on a strictly increasing millisecond clock, and
-        # the shell's frame timestamps come off the phone's wall clock, so a
-        # replay loop or a stalled camera can hand us the same stamp twice.
-        ts_ms = max(frame.t_ns // 1_000_000, self._last_ts_ms + 1)
-        self._last_ts_ms = ts_ms
-        result = self._landmarker.detect_for_video(image, ts_ms)
+        detections = self._backend.detect(frame.rgb, frame.t_ns)
 
-        detected = len(result.hand_landmarks)
         hands: list[TrackedHand] = []
         valid_total = 0
         valid_count = 0
         seen: set[str] = set()
 
-        for i, landmarks in enumerate(result.hand_landmarks):
-            chirality = self._chirality(result.handedness, i)
-            if chirality in seen:
-                # Two detections labelled the same hand: the shell keys its
-                # slots on chirality, so the second would overwrite the first.
-                continue
-            world = result.hand_world_landmarks[i] if result.hand_world_landmarks else None
-            hand = self._to_scene(frame, landmarks, world, chirality,
-                                  self._confidence(result.handedness, i))
+        for detection in detections:
+            hand = self._to_scene(frame, detection)
             if hand is None:
                 continue
-            seen.add(chirality)
+            if hand.chirality in seen:
+                # Two detections of the same hand: the shell keys its slots on
+                # chirality, so the second would overwrite the first.
+                continue
+            seen.add(hand.chirality)
             hands.append(hand)
             valid_total += int(hand.depth_valid.size)
             valid_count += int(hand.depth_valid.sum())
@@ -133,41 +120,20 @@ class HandTracker:
 
         return TrackResult(
             hands=hands,
-            detected=detected,
+            detected=len(detections),
             depth_valid_fraction=(valid_count / valid_total) if valid_total else 0.0,
         )
 
     # -- internals ---------------------------------------------------------
 
-    def _chirality(self, handedness, i: int) -> str:
-        label = "right"
-        if handedness and i < len(handedness) and handedness[i]:
-            label = handedness[i][0].category_name.lower()
-        # MediaPipe labels handedness as if it were looking at a mirror, which
-        # is right for a selfie camera and backwards for the phone's rear
-        # camera streaming this rig.
-        if self._flip:
-            label = "left" if label == "right" else "right"
-        return label
-
-    @staticmethod
-    def _confidence(handedness, i: int) -> float:
-        if handedness and i < len(handedness) and handedness[i]:
-            return float(handedness[i][0].score)
-        return 1.0
-
     def _to_scene(
-        self, frame: ExportedFrame, landmarks, world, chirality: str, confidence: float
+        self, frame: ExportedFrame, detection: Detection
     ) -> TrackedHand | None:
         if not frame.ready_for_metric_3d():
             return None
-        depth_map = frame.depth
-        intr = frame.intrinsics
 
-        n = len(landmarks)
-        depths = np.zeros(n, dtype=np.float64)
-        for j, lm in enumerate(landmarks):
-            depths[j] = sample_depth(depth_map, lm.x, lm.y, self._window)
+        landmarks = detection.landmarks_px
+        depths = self._sample_depths(frame, landmarks)
         depth_valid = depths > 0.0
 
         ref = self._reference(depth_valid)
@@ -175,45 +141,93 @@ class HandTracker:
             if self._fallback_depth <= 0.0:
                 return None
             depths[:] = self._fallback_depth
-        elif world is not None:
-            # MediaPipe's world z grows AWAY from the camera in the same sense
-            # as the depth map, so a difference in world z is a difference in
-            # range. The landmark keeps its own pixel, so only the range is
-            # being guessed, never the direction.
-            for j in range(n):
-                if not depth_valid[j]:
-                    depths[j] = max(
-                        0.05, depths[ref] + (world[j].z - world[ref].z)
-                    )
         else:
-            depths[~depth_valid] = depths[ref]
+            self._fill_missing_ranges(depths, depth_valid, ref, detection.world)
 
-        joints = np.zeros((n, 3), dtype=np.float64)
-        for j, lm in enumerate(landmarks):
+        joints = self._unproject_all(frame, landmarks, depths)
+        if joints is None:
+            return None
+
+        chirality = self._chirality(detection, joints, landmarks)
+        if chirality is None:
+            # Edge-on in both the depth and the picture: nothing left to tell
+            # this hand from its mirror image, and guessing would put it in
+            # the other hand's slot, which reads downstream as the hand
+            # teleporting across the body. Dropping the frame lets the last
+            # good hand age out on its own 150 ms clock instead.
+            return None
+
+        filt = self._filters.get(chirality)
+        if filt is None:
+            filt = JointFilter(*self._filter_params, joints=joints.shape[0])
+            self._filters[chirality] = filt
+
+        return TrackedHand(
+            chirality=chirality,
+            confidence=detection.confidence,
+            joints=filt.apply(joints, frame.t_ns / 1e9),
+            depth_valid=depth_valid,
+        )
+
+    def _chirality(
+        self, detection: Detection, joints: np.ndarray, landmarks: np.ndarray
+    ) -> str | None:
+        """Which hand this is, from the model, the depth, or the picture.
+
+        The 3D test is the one that needs no assumption, so it goes first —
+        but it needs the thumb to stand off the palm plane in MEASURED depth,
+        and most of a hand's landmarks miss the 32x24 LiDAR map and take the
+        reference landmark's range. A hand whose fingers all came back at one
+        depth is flat by construction and says nothing about chirality, which
+        is the common case rather than the corner one. The picture then
+        decides it, under the stated assumption about which face is turned to
+        the camera.
+        """
+        if detection.chirality is not None:
+            return detection.chirality
+        return chirality_from_joints(joints) or chirality_from_pixels(
+            landmarks, dorsal=self._dorsal
+        )
+
+    def _sample_depths(self, frame: ExportedFrame, landmarks: np.ndarray) -> np.ndarray:
+        depths = np.zeros(landmarks.shape[0], dtype=np.float64)
+        for j, (u, v) in enumerate(landmarks):
+            depths[j] = sample_depth(
+                frame.depth, u / frame.width, v / frame.height, self._window
+            )
+        return depths
+
+    @staticmethod
+    def _fill_missing_ranges(
+        depths: np.ndarray, depth_valid: np.ndarray, ref: int, world: np.ndarray | None
+    ) -> None:
+        if world is None:
+            # No metric hand model: the best available guess is that the
+            # landmark is as far away as the one anchoring it.
+            depths[~depth_valid] = depths[ref]
+            return
+        # MediaPipe's world z grows AWAY from the camera in the same sense as
+        # the depth map, so a difference in world z is a difference in range.
+        # The landmark keeps its own pixel, so only the range is being
+        # guessed, never the direction.
+        missing = np.flatnonzero(~depth_valid)
+        depths[missing] = np.maximum(
+            0.05, depths[ref] + (world[missing, 2] - world[ref, 2])
+        )
+
+    @staticmethod
+    def _unproject_all(
+        frame: ExportedFrame, landmarks: np.ndarray, depths: np.ndarray
+    ) -> np.ndarray | None:
+        joints = np.zeros((landmarks.shape[0], 3), dtype=np.float64)
+        for j, (u, v) in enumerate(landmarks):
             p_cam = unproject(
-                intr,
-                frame.width,
-                frame.height,
-                lm.x * frame.width,
-                lm.y * frame.height,
-                depths[j],
+                frame.intrinsics, frame.width, frame.height, u, v, depths[j]
             )
             if p_cam is None:
                 return None
             joints[j] = camera_to_scene(frame.head_pos, frame.head_quat, p_cam)
-
-        filt = self._filters.get(chirality)
-        if filt is None:
-            filt = JointFilter(*self._filter_params, joints=n)
-            self._filters[chirality] = filt
-        joints = filt.apply(joints, frame.t_ns / 1e9)
-
-        return TrackedHand(
-            chirality=chirality,
-            confidence=confidence,
-            joints=joints,
-            depth_valid=depth_valid,
-        )
+        return joints
 
     @staticmethod
     def _reference(depth_valid: np.ndarray) -> int | None:
@@ -235,3 +249,21 @@ class HandTracker:
         for chirality, filt in self._filters.items():
             if chirality not in seen:
                 filt.reset()
+
+
+def tracker_from_args(args) -> HandTracker:
+    """One place where the CLI's flags become a tracker, so `track` and `eval`
+    cannot drift into configuring the same pipeline differently."""
+    shared = dict(
+        backend=args.backend,
+        depth_window=args.depth_window,
+        min_cutoff=args.min_cutoff,
+        beta=args.beta,
+        fallback_depth_m=args.fallback_depth_m,
+        dorsal_view=args.dorsal_view,
+    )
+    if args.backend == "mediapipe":
+        return HandTracker(
+            **shared, model_path=args.model, flip_handedness=args.flip_handedness
+        )
+    return HandTracker(**shared, device=args.device, det_interval=args.det_interval)

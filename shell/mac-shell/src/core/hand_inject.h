@@ -69,15 +69,22 @@ void camera_to_scene(const float cam_pos[3], const float cam_quat[4],
 // SB_JOINT_* order, ready to hand straight to the scene.
 struct injected_hands {
     uint64_t t_ms = 0;  // sender's wall clock, ms since the Unix epoch
+    // The `export_ns` of the frame these joints were tracked from, echoed
+    // back by the tracker so the shell can subtract it from its own clock and
+    // report the transport latency. 0 when the tracker did not send one.
+    // Both stamps are CLOCK_REALTIME on THIS Mac — the frame's own capture
+    // timestamp is the phone's clock and would measure a clock offset rather
+    // than a latency.
+    uint64_t frame_t_ns = 0;
     int count = 0;      // 0..2
     sb_hand_t hands[2] = {};
     bool is_left[2] = {false, false};
 };
 
-// Parses {"t":ms,"hands":[{"chirality":"left|right","confidence":0..1,
-// "joints":[[x,y,z] x21 in MediaPipe landmark order]}]}.
-// Joints are reordered into SB_JOINT_* order on the way in. False + a short
-// `err` for anything malformed or non-finite.
+// Parses {"t":ms,"frame_t_ns":ns,"hands":[{"chirality":"left|right",
+// "confidence":0..1,"joints":[[x,y,z] x21 in MediaPipe landmark order]}]}.
+// Joints are reordered into SB_JOINT_* order on the way in. `frame_t_ns` is
+// optional. False + a short `err` for anything malformed or non-finite.
 bool parse_hands_inject(const std::string &json, injected_hands &out,
                         std::string &err);
 
@@ -103,6 +110,11 @@ class hand_inject_store {
     bool ever_set() const { return ever_; }
     // Age of the freshest held hand in ms; 0 when nothing was ever injected.
     uint64_t age_ms(uint64_t now_ms) const;
+    // Frame export -> injection held, in ms: the freshest hand's `now_ms`
+    // minus the `frame_t_ns` it was tracked from. -1 when no held hand
+    // carries one, which is what a tracker that never sends the field looks
+    // like. This is the number `e2e` in the tracker's fps line reports.
+    int64_t e2e_ms(uint64_t now_ms) const;
     // True while at least one held hand is younger than HAND_INJECT_FRESH_MS
     // and so should replace the phone's hands.
     bool fresh(uint64_t now_ms) const;
@@ -112,6 +124,7 @@ class hand_inject_store {
    private:
     sb_hand_t hands_[2] = {};
     uint64_t received_ms_[2] = {0, 0};
+    uint64_t frame_t_ns_[2] = {0, 0};
     bool ever_ = false;
 };
 

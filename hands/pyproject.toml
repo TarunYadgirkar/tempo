@@ -10,7 +10,9 @@ requires-python = ">=3.12"
 dependencies = [
     "mediapipe==0.10.21",
     "numpy>=1.26.4",
+    "onnxruntime>=1.30.0",
     "pillow>=12.3.0",
+    "rtmlib>=0.0.16",
 ]
 
 [project.scripts]

@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -286,7 +287,9 @@ static void test_frame_export(ctl_client &c, const std::string &export_dir) {
     CHECK_MSG(contains(r, "err parse_error"), r.c_str());
 
     r = c.request("frame-export on " + export_dir);
-    CHECK_MSG(contains(r, "ok on dir=") && contains(r, "hz=15"), r.c_str());
+    CHECK_MSG(contains(r, "ok on dir=") && contains(r, "hz=30") &&
+                  contains(r, "format=jpeg"),
+              r.c_str());
 
     // Wait for the first published frame. The sidecar is renamed last, so its
     // presence means the .jpg and .depth beside it are complete.
@@ -307,7 +310,14 @@ static void test_frame_export(ctl_client &c, const std::string &export_dir) {
                   TEST_JPEG_W, TEST_JPEG_H);
     CHECK_MSG(contains(json, imgbuf), json.c_str());
     CHECK_MSG(contains(json, "\"file\":\"latest.jpg\""), json.c_str());
+    CHECK_MSG(contains(json, "\"format\":\"jpeg\""), json.c_str());
     CHECK_MSG(contains(json, "\"t_ns\":1000000000"), json.c_str());
+    // export_ns is this Mac's realtime clock, not the phone's capture clock —
+    // the pair the latency is measured across. A present-day epoch in ns is
+    // past 1.7e18, so this also pins that it is not the frame stamp repeated.
+    CHECK_MSG(contains(json, "\"export_ns\":17") ||
+                  contains(json, "\"export_ns\":18"),
+              json.c_str());
 
     // Intrinsics arrive as their own packet and are in ARKit capture pixels,
     // not the JPEG's — the tracker rescales, so both numbers must be here.
@@ -363,6 +373,43 @@ static void test_frame_export(ctl_client &c, const std::string &export_dir) {
     CHECK_MSG(r.rfind("ok off", 0) == 0, r.c_str());
 }
 
+// Raw mode publishes the decoded pixels instead of a JPEG, so the tracker
+// skips a decode the shell already paid for as an encode. The replayed frame
+// is narrower than FRAME_EXPORT_RAW_MAX_WIDTH, so this also pins that a frame
+// under the cap is published at its own size rather than upscaled.
+static void test_frame_export_raw(ctl_client &c, const std::string &dir) {
+    std::string r = c.request("frame-export on " + dir + " --raw");
+    CHECK_MSG(contains(r, "ok on dir=") && contains(r, "format=rgb8"),
+              r.c_str());
+
+    std::string json;
+    for (int waited = 0; waited < 8000; waited += 100) {
+        json = read_file(dir + "/latest.json");
+        if (!json.empty() && json.find('}') != std::string::npos)
+            break;
+        usleep(100 * 1000);
+    }
+    CHECK_MSG(!json.empty(), "raw mode wrote no latest.json");
+    if (json.empty())
+        return;
+    CHECK_MSG(contains(json, "\"file\":\"latest.rgb\""), json.c_str());
+    CHECK_MSG(contains(json, "\"format\":\"rgb8\""), json.c_str());
+    CHECK_MSG(!contains(json, "latest.jpg"), json.c_str());
+
+    // No header, no padding: exactly width x height x 3 bytes, which is the
+    // whole contract a reader has to rely on.
+    char imgbuf[64];
+    std::snprintf(imgbuf, sizeof(imgbuf), "\"width\":%u,\"height\":%u",
+                  TEST_JPEG_W, TEST_JPEG_H);
+    CHECK_MSG(contains(json, imgbuf), json.c_str());
+    const std::string rgb = read_file(dir + "/latest.rgb");
+    CHECK_MSG(rgb.size() == (size_t)TEST_JPEG_W * TEST_JPEG_H * 3,
+              "latest.rgb is not width x height x 3 bytes");
+
+    r = c.request("frame-export off");
+    CHECK_MSG(r.rfind("ok off frames=", 0) == 0, r.c_str());
+}
+
 // ---------------------------------------------------------------------------
 // hands-inject
 // ---------------------------------------------------------------------------
@@ -390,6 +437,10 @@ static void test_hands_inject(ctl_client &c) {
     std::string r = c.request("hands status");
     CHECK_MSG(contains(r, "source=phone"), r.c_str());
     CHECK_MSG(contains(r, "overlay="), r.c_str());
+    // A tracker that sends no frame stamp gets -1 rather than a number that
+    // looks like a latency, which is what every payload below this line
+    // except the last one is.
+    CHECK_MSG(contains(r, "e2e_ms=-1"), r.c_str());
 
     // The replayed session carries no 0x05 hands, so nothing is tracked yet.
     r = c.request("hands dump");
@@ -434,6 +485,30 @@ static void test_hands_inject(ctl_client &c) {
     CHECK_MSG(contains(r, "source=phone"), r.c_str());
     r = c.request("hands dump");
     CHECK_MSG(contains(r, "\"source\":\"phone\""), r.c_str());
+
+    // `frame_t_ns` echoes the sidecar's export_ns back, so the shell can
+    // report export -> injection on its own clock and the tracker's `e2e`
+    // stops being n/a. A stamp from a moment ago must read as a small
+    // positive number of ms, and never as the 25-year answer a phone-clock
+    // frame timestamp would give.
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    const uint64_t stamped_ns =
+        (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec - 40000000ull;
+    std::string stamped = pinch_payload(0.2f);
+    stamped.insert(stamped.find(",\"hands\""),
+                   ",\"frame_t_ns\":" + std::to_string(stamped_ns));
+    CHECK(c.request("hands-inject " + stamped) == "ok");
+    r = c.request("hands status");
+    const size_t at = r.find("e2e_ms=");
+    CHECK_MSG(at != std::string::npos, r.c_str());
+    if (at != std::string::npos) {
+        const long long e2e = std::atoll(r.c_str() + at + 7);
+        CHECK_MSG(e2e >= 40 && e2e < 2000, r.c_str());
+    }
+    CHECK(contains(c.request("hands-inject {\"t\":1,\"frame_t_ns\":-5,"
+                             "\"hands\":[]}"),
+                   "err bad_json"));
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +561,7 @@ int main() {
     if (c.fd >= 0) {
         CHECK(c.request("version") == "ok proto=1");
         test_frame_export(c, export_dir);
+        test_frame_export_raw(c, export_dir + "-raw");
         test_hands_inject(c);
         c.close_fd();
     }
@@ -508,10 +584,13 @@ int main() {
 
     unlink(session.c_str());
     unlink(sock.c_str());
-    unlink((export_dir + "/latest.jpg").c_str());
-    unlink((export_dir + "/latest.json").c_str());
-    unlink((export_dir + "/latest.depth").c_str());
-    rmdir(export_dir.c_str());
+    for (const std::string &d : {export_dir, export_dir + "-raw"}) {
+        unlink((d + "/latest.jpg").c_str());
+        unlink((d + "/latest.rgb").c_str());
+        unlink((d + "/latest.json").c_str());
+        unlink((d + "/latest.depth").c_str());
+        rmdir(d.c_str());
+    }
 
     if (g_failures) {
         std::fprintf(stderr, "hands_e2e: %d failure(s)\n", g_failures);

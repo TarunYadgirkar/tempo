@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .backends import BACKENDS, DEFAULT_BACKEND, DEFAULT_MODEL
 from .evaluate import run_eval
 from .track import run_track
-from .tracker import DEFAULT_MODEL
 
 
 def _common(p: argparse.ArgumentParser) -> None:
@@ -21,7 +21,45 @@ def _common(p: argparse.ArgumentParser) -> None:
         default=None,
         help="shell control socket (default: $SPATIAL_OS_SOCK)",
     )
+    p.add_argument(
+        "--backend",
+        choices=BACKENDS,
+        default=DEFAULT_BACKEND,
+        help=(
+            "which model finds the landmarks. rtmpose is RTMDet-nano + "
+            "RTMPose-m through rtmlib, several times faster and sharper than "
+            "mediapipe's 2020 model; mediapipe is the original path, kept so "
+            "the two can be compared on the same frames"
+        ),
+    )
+    p.add_argument(
+        "--device",
+        default="auto",
+        help=(
+            "rtmpose only: auto (CoreML for the pose model, CPU if it is "
+            "refused), mps, or cpu"
+        ),
+    )
+    p.add_argument(
+        "--det-interval",
+        type=int,
+        default=10,
+        help=(
+            "rtmpose only: frames between hand DETECTIONS. In between, the "
+            "hand is looked for inside the box it was in last frame, which is "
+            "most of the speed-up"
+        ),
+    )
     p.add_argument("--model", default=str(DEFAULT_MODEL), help="hand_landmarker.task")
+    p.add_argument(
+        "--raw",
+        action="store_true",
+        help=(
+            "ask the shell for raw decoded pixels (latest.rgb) instead of a "
+            "JPEG, which drops an encode on its side and a decode on ours. "
+            "Only meaningful with --enable-export"
+        ),
+    )
     p.add_argument(
         "--no-flip-handedness",
         dest="flip_handedness",
@@ -30,6 +68,20 @@ def _common(p: argparse.ArgumentParser) -> None:
             "keep MediaPipe's handedness labels as-is. They assume a mirrored "
             "selfie image, so they are flipped by default for the phone's rear "
             "camera"
+        ),
+    )
+    p.add_argument(
+        "--palmar-view",
+        dest="dorsal_view",
+        action="store_false",
+        help=(
+            "the camera sees the PALMS of the hands rather than their backs. "
+            "Only used when the model gives no handedness of its own (rtmpose "
+            "does not) and the hand is too flat in depth to tell: two "
+            "dimensions cannot separate a left hand from a right one without "
+            "knowing which face is turned to the camera. The default suits "
+            "the phone's head-mounted rear camera, which sees a raised hand "
+            "from the back"
         ),
     )
     p.add_argument(

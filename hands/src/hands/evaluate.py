@@ -36,7 +36,7 @@ import numpy as np
 from .control import ShellControl, ShellError
 from .export_reader import ExportReader
 from .geometry import FINGERTIPS
-from .tracker import HandTracker
+from .tracker import tracker_from_args
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "results"
 
@@ -195,14 +195,7 @@ def record(args, shell: ShellControl) -> tuple[SourceLog, SourceLog, set[str]]:
     t0 = time.monotonic()
     next_print = t0 + 1.0
 
-    with HandTracker(
-        model_path=args.model,
-        flip_handedness=args.flip_handedness,
-        depth_window=args.depth_window,
-        min_cutoff=args.min_cutoff,
-        beta=args.beta,
-        fallback_depth_m=args.fallback_depth_m,
-    ) as tracker:
+    with tracker_from_args(args) as tracker:
         while time.monotonic() - t0 < args.seconds:
             frame = reader.wait(timeout_s=1.0)
             if frame is None:
@@ -224,6 +217,7 @@ def record(args, shell: ShellControl) -> tuple[SourceLog, SourceLog, set[str]]:
                             }
                             for h in result.hands
                         ],
+                        frame_t_ns=frame.export_ns,
                     )
             else:
                 mac.add(t, None)
@@ -270,7 +264,8 @@ def write_report(results: dict, out_json: Path) -> Path:
         f"{phone['frames']} frames, both sources sampled against the same "
         "exported frame.",
         "",
-        "| | phone (Apple Vision) | mac (MediaPipe + LiDAR) | change |",
+        f"| | phone (Apple Vision) | mac ({results['backend']} + LiDAR) | "
+        "change |",
         "| --- | --- | --- | --- |",
         f"| Frames with a hand | {phone['detect_rate']:.0%} | "
         f"{mac['detect_rate']:.0%} | "
@@ -331,9 +326,13 @@ def run_eval(args) -> int:
     started_export = False
     try:
         if args.enable_export:
-            print(shell.frame_export_on(args.dir), flush=True)
+            print(shell.frame_export_on(args.dir, raw=args.raw), flush=True)
             started_export = True
-        print(f"recording {args.seconds:.0f}s from {args.dir}", flush=True)
+        print(
+            f"recording {args.seconds:.0f}s from {args.dir} "
+            f"[{args.backend}]",
+            flush=True,
+        )
         phone, mac, dump_sources = record(args, shell)
     finally:
         if started_export:
@@ -348,6 +347,7 @@ def run_eval(args) -> int:
         "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "seconds": args.seconds,
         "export_dir": args.dir,
+        "backend": args.backend,
         "injected_while_recording": bool(args.inject),
         "dump_sources": sorted(dump_sources),
         "phone": analyse(phone),

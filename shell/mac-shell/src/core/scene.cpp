@@ -939,10 +939,11 @@ bool scene::hands_inject(const std::string &json, std::string &err) {
 std::string scene::hands_source_status() const {
     std::lock_guard<std::mutex> lock(mutex_);
     const uint64_t now = hand_inject_now_ms();
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "source=%s age_ms=%llu",
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "source=%s age_ms=%llu e2e_ms=%lld",
                   hand_inject_.fresh(now) ? "mac" : "phone",
-                  (unsigned long long)hand_inject_.age_ms(now));
+                  (unsigned long long)hand_inject_.age_ms(now),
+                  (long long)hand_inject_.e2e_ms(now));
     return buf;
 }
 
