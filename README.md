@@ -75,6 +75,7 @@ uv run tempo ask put a note on the desk that says buy milk
 uv run tempo --speak listen                 # push-to-talk loop
 uv run tempo people --frames "$TMPDIR/spatula-frames"   # faces + voices, a bubble beside each head
 uv run tempo people me Tarun                # 6 s of your own voice so your speech is never filed under a guest
+cd ../hands && uv run hands calibrate --write   # open / pinch / fist, 6 s each; restart the shell to load the thresholds
 ```
 
 Without a phone: `SPATULA_MAC_HEADLESS=1 shell/build/mac-shell/mac-shell --replay shell/tests/recorded-sessions/initial.bin` replays a recorded session so `head-pose` and `list-planes` work (screenshot needs the windowed renderer).
