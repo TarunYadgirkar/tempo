@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -27,6 +28,9 @@ from .shell import Shell, ShellError
 from .voices import VOICE_MATCH, Ear, Segment
 
 STORE = Path(os.environ.get("TEMPO_PEOPLE_STORE") or Path.home() / ".config" / "tempo" / "people.json")
+CONVERSATION_LOG = STORE.with_name("conversations.jsonl")
+SUMMARY_MIN_UTTERANCES = 3
+SUMMARY_EVERY = 2
 MAX_EMBEDDINGS = 12
 MAX_UTTERANCES = 30
 # A new embedding is only banked when it adds something the bank lacks.
@@ -59,6 +63,8 @@ class Person:
     is_owner: bool = False
     siyi: dict[str, Any] | None = None
     siyi_checked_for: str | None = None
+    summary: str | None = None        # one line from Gemini: what we talked about
+    summarized_count: int = 0         # utterances covered by `summary`
 
     @property
     def label(self) -> str:
@@ -79,6 +85,16 @@ class Person:
     def say(self, text: str, at: float) -> None:
         self.utterances.append({"t": at, "text": text})
         del self.utterances[:-MAX_UTTERANCES]
+        try:
+            CONVERSATION_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with CONVERSATION_LOG.open("a") as f:
+                f.write(json.dumps({"t": at, "person": self.id, "name": self.name, "text": text}) + "\n")
+        except OSError:
+            pass
+
+    def wants_summary(self) -> bool:
+        n = len(self.utterances)
+        return n >= SUMMARY_MIN_UTTERANCES and n - self.summarized_count >= SUMMARY_EVERY
 
     def last_said(self) -> str | None:
         return self.utterances[-1]["text"] if self.utterances else None
@@ -173,12 +189,48 @@ def describe(head: dict[str, Any] | None = None) -> dict[str, Any]:
         known.append(p.label)
         if now - p.last_seen <= RECENT_S:
             entry: dict[str, Any] = {"name": p.name, "seen_s_ago": round(now - p.last_seen, 1)}
-            if p.last_said():
-                entry["last_said"] = p.last_said()
+            if p.utterances:
+                entry["recent"] = [u["text"] for u in p.utterances[-5:]]
+            if p.summary:
+                entry["summary"] = p.summary
             if p.siyi:
                 entry["notes"] = p.siyi.get("note") or None
             present.append(entry)
     return {"present": present, "known": sorted(n for n in known if n != "Someone new")}
+
+
+SUMMARY_PROMPT = (
+    "You are the memory of a pair of AR glasses. Below are things one person said to the wearer, in order. "
+    "Write ONE plain sentence (max 18 words) the wearer would want beside this person's face next time: "
+    "what they talked about, anything they asked for or promised. No preamble, no quotes."
+)
+
+
+_gemini = None
+
+
+def summarize(person: Person) -> str | None:
+    """One line from Gemini about what this person and the wearer discussed."""
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key or not person.utterances:
+        return None
+    from google import genai
+
+    global _gemini
+    if _gemini is None:
+        _gemini = genai.Client(api_key=key)  # the SDK closes a client that goes out of scope mid-call
+    lines = "\n".join(f"- {u['text']}" for u in person.utterances[-MAX_UTTERANCES:])
+    who = person.name or "an unnamed person"
+    try:
+        resp = _gemini.models.generate_content(
+            model=os.environ.get("TEMPO_MODEL", "gemini-3.6-flash"),
+            contents=f"{SUMMARY_PROMPT}\n\nPerson: {who}\n{lines}",
+        )
+        text = (resp.text or "").strip().splitlines()
+        return text[0].strip()[:160] if text else None
+    except Exception as exc:
+        print(f"people: summary failed: {exc}", file=sys.stderr)
+        return None
 
 
 def parse_name(text: str) -> tuple[str, str] | None:
@@ -203,6 +255,8 @@ def bubble_text(person: Person) -> tuple[str, str]:
         if person.siyi.get("last_at"):
             tail = f": {person.siyi['last_note']}" if person.siyi.get("last_note") else ""
             lines.append(f"Last logged {person.siyi['last_at']}{tail}")
+    if person.summary:
+        lines.append(person.summary)
     said = person.last_said()
     if said:
         lines.append(f"Said: “{said[:90]}”")
@@ -356,6 +410,19 @@ class PeopleDaemon:
             person.siyi_checked_for = person.name
             threading.Thread(target=self._siyi_lookup, args=(person,), daemon=True).start()
 
+    def _summarize(self, person: Person) -> None:
+        count = len(person.utterances)
+        line = summarize(person)
+        if not line:
+            return
+        with self.people.lock:
+            person.summary, person.summarized_count = line, count
+            sight = self.recent.get(person.id)
+            if sight and time.time() - sight.at <= FOCUS_WINDOW_S:
+                self.bubbles.show(person, sight.pos, self.head_pos, time.time())
+        self.people.save()
+        self.log(f"people: {person.label}: {line}")
+
     def _siyi_lookup(self, person: Person) -> None:
         info = siyi.lookup(person.name or "")
         if info:
@@ -399,6 +466,8 @@ class PeopleDaemon:
                 if target is not None:
                     self.rename(target, introduced[1])
             self.enrich(speaker)
+            if speaker.wants_summary():
+                threading.Thread(target=self._summarize, args=(speaker,), daemon=True).start()
             sight = self.recent.get(speaker.id)
             if sight and now - sight.at <= FOCUS_WINDOW_S:
                 self.bubbles.show(speaker, sight.pos, self.head_pos, now)

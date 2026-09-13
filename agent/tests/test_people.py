@@ -55,3 +55,20 @@ def test_bubble_text_asks_for_a_name_until_it_has_one():
     p.say("we should ship on Monday", 0.0)
     title, body = pp.bubble_text(p)
     assert title == "Alice" and "ship on Monday" in body
+
+
+def test_summary_cadence(tmp_path, monkeypatch):
+    monkeypatch.setattr(pp, "CONVERSATION_LOG", tmp_path / "c.jsonl")
+    p = pp.Person(id="y")
+    for i in range(2):
+        p.say(f"line {i}", float(i))
+    assert not p.wants_summary()
+    p.say("line 2", 2.0)
+    assert p.wants_summary()
+    p.summary, p.summarized_count = "talked about lines", 3
+    p.say("line 3", 3.0)
+    assert not p.wants_summary()
+    p.say("line 4", 4.0)
+    assert p.wants_summary()
+    assert (tmp_path / "c.jsonl").read_text().count("\n") == 5
+    assert "talked about lines" in pp.bubble_text(p)[1]

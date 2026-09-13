@@ -121,6 +121,17 @@ def cmd_people(args: argparse.Namespace) -> None:
     if args.action == "forget":
         print("forgot" if pp.People().forget(args.name) else "no such person", args.name)
         return
+    if args.action == "summarize":
+        store = pp.People()
+        p = store.by_name(args.name or "")
+        if not p:
+            raise SystemExit(f"no person named {args.name!r}")
+        line = pp.summarize(p)
+        if line:
+            p.summary, p.summarized_count = line, len(p.utterances)
+            store.save()
+        print(line or "no summary (no key, or nothing said)")
+        return
     if args.action == "me":
         p = pp.enroll_owner(args.name, log=print)
         print(f"you are {p.name} ({len(p.voices)} voiceprints)")
@@ -169,7 +180,7 @@ def main() -> None:
     o.add_argument("--conf", type=float, default=0.25)
     o.set_defaults(fn=cmd_objects)
     pe = sub.add_parser("people", help="faces + voices in the room, with a bubble beside each head")
-    pe.add_argument("action", nargs="?", default="watch", choices=["watch", "list", "forget", "me"])
+    pe.add_argument("action", nargs="?", default="watch", choices=["watch", "list", "forget", "me", "summarize"])
     pe.add_argument("name", nargs="?", help="for forget/me")
     pe.add_argument("--frames", help="frame export directory written by the shell")
     pe.add_argument("--no-mic", action="store_true", help="faces only, no listening")
