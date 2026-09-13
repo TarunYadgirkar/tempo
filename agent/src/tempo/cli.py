@@ -144,7 +144,7 @@ def main() -> None:
     o.add_argument("--once", action="store_true", help="one frame instead of a loop")
     o.add_argument("--backend", default=objects_backend(), choices=["owlv2", "owlvit"], help="owlv2 is more accurate, owlvit is ~7x faster")
     o.add_argument("--prompts", help="comma separated vocabulary (default: common room objects)")
-    o.add_argument("--conf", type=float, default=0.12)
+    o.add_argument("--conf", type=float, default=0.25)
     o.set_defaults(fn=cmd_objects)
     e = sub.add_parser("eval", help="run the fixed request set")
     e.add_argument("conditions", nargs="*", default=["geometry", "pixels"])

@@ -24,6 +24,22 @@ An AR shell for glasses, running today on an iPhone strapped in front of a Mac.
 
 The agent never gets pixels-only or geometry-only. It gets both, which is what lets it answer "put that on the wall behind the monitor" with a world coordinate.
 
+### What the agent knows about the room
+
+| Signal | Where it comes from | What it enables |
+|---|---|---|
+| Head pose, gravity up, camera roll | ARKit on the phone | "in front", "left", "above", level panels |
+| Surface under the gaze or the pointing finger | Ray march through the LiDAR depth map (`cast`) | notes that sit on the wall or lie on the desk with the surface's orientation |
+| Floor height | Lowest horizontal depth cluster (`floor`) | "on the floor", height-aware placement |
+| Objects with 3D positions | OWL-ViT open-vocabulary detector on the Mac GPU, box centre unprojected through LiDAR depth, tracked across frames, persisted (`agent/src/tempo/objects.py`) | "next to the whiteboard", "by the lamp" |
+| Remembered places | Named 3D spots saved by the wearer (`memory.py`) | "remember this is my charger" / "where's my charger" answered relative to where they stand now |
+| Hands | Mac-side RTMPose (rtmlib, ONNX) over the streamed frames, fused with LiDAR depth, injected into the compositor's gesture engine (`hands/`) | pinch to click, pinch-and-talk, "put it there" while pointing |
+| Panels already in the room | compositor (`list-windows`) | move, close, gather, save and restore layouts |
+
+### Talking to it
+
+`uv run tempo live` is the daily driver: hold a pinch, speak, release. Speech goes through a local Whisper (mlx-whisper on the Mac GPU), the request plus the room snapshot goes to Gemini with the spatial tools, and the reply is spoken back. `tempo ask` is the typed equivalent.
+
 ## Architecture
 
 ```
