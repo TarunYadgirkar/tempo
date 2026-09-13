@@ -156,6 +156,31 @@ class People:
             return True
 
 
+RECENT_S = 15.0
+
+
+def describe(head: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What the agent should know about people: who is here now, who it knows."""
+    try:
+        store = People()
+    except Exception:
+        return {"present": [], "known": []}
+    now = time.time()
+    present, known = [], []
+    for p in store.people.values():
+        if p.is_owner:
+            continue
+        known.append(p.label)
+        if now - p.last_seen <= RECENT_S:
+            entry: dict[str, Any] = {"name": p.name, "seen_s_ago": round(now - p.last_seen, 1)}
+            if p.last_said():
+                entry["last_said"] = p.last_said()
+            if p.siyi:
+                entry["notes"] = p.siyi.get("note") or None
+            present.append(entry)
+    return {"present": present, "known": sorted(n for n in known if n != "Someone new")}
+
+
 def parse_name(text: str) -> tuple[str, str] | None:
     """('self'|'other', Name) when the sentence introduces someone."""
     for kind, pattern in (("self", FIRST_PERSON), ("other", THIRD_PERSON)):

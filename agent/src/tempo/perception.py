@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image
 
 from . import spatial
+from . import people
 from .memory import Memory
 from .shell import Shell
 
@@ -57,6 +58,7 @@ class Snapshot:
                 "panels": panels,
                 "objects": self.objects(),
                 "remembered_places": Memory().describe_for(self.head),
+                "people": people.describe(self.head),
                 "hand": {
                     "visible": self.aim["hands"] > 0,
                     "pointing_at_m": [round(v, 2) for v in self.aim["hit"]] if self.aim.get("hit") else None,
