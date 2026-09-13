@@ -36,7 +36,7 @@ BACKENDS = {
     "owlvit": "google/owlvit-base-patch32",
 }
 DEFAULT_BACKEND = os.environ.get("TEMPO_DETECT_BACKEND", "owlv2")
-DEFAULT_CONF = 0.12
+DEFAULT_CONF = 0.3
 
 STORE = Path(os.environ.get("TEMPO_OBJECT_STORE", Path.home() / ".config" / "tempo" / "objects.json"))
 
