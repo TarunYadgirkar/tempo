@@ -44,14 +44,22 @@ def cmd_ask(args: argparse.Namespace) -> None:
 
 
 def cmd_listen(args: argparse.Namespace) -> None:
-    from .voice import record_until_enter
+    from .voice import record_until_enter, transcribe
 
     shell = Shell()
     brain = Brain(args.model)
     while True:
         input("press Enter to talk (Ctrl-C to quit) ")
-        wav = record_until_enter()
-        _handle(shell, brain, "", wav, True)
+        text = transcribe(record_until_enter())
+        print("you:", text)
+        if text:
+            _handle(shell, brain, text, None, True)
+
+
+def cmd_live(args: argparse.Namespace) -> None:
+    from .live import Live
+
+    Live(args.model, speak=not args.quiet).run()
 
 
 def cmd_scene(args: argparse.Namespace) -> None:
@@ -79,6 +87,9 @@ def main() -> None:
     a.add_argument("words", nargs="+")
     a.set_defaults(fn=cmd_ask)
     sub.add_parser("listen", help="push-to-talk loop").set_defaults(fn=cmd_listen)
+    lv = sub.add_parser("live", help="pinch-and-talk daemon")
+    lv.add_argument("--quiet", action="store_true")
+    lv.set_defaults(fn=cmd_live)
     sub.add_parser("scene", help="dump what the agent would see").set_defaults(fn=cmd_scene)
     e = sub.add_parser("eval", help="run the fixed request set")
     e.add_argument("conditions", nargs="*", default=["geometry", "pixels"])
