@@ -385,6 +385,11 @@ void scene::tick(float dt) {
 void scene::tick_locked(float dt) {
     now_s_ += dt;
     toasts_.tick(dt);
+    // A fresh `hands-inject` outranks the phone: mac-side MediaPipe is the
+    // better tracker, and mixing the two sources frame-to-frame would make
+    // every gesture threshold chatter. Checked before the receiver drain so
+    // it works with or without one.
+    const bool injected = adopt_injected_hands();
     if (receiver_) {
         sb_pose_t pose;
         if (sb_get_latest_pose(receiver_, &pose))
@@ -395,10 +400,12 @@ void scene::tick_locked(float dt) {
         if (n >= 0)
             ingest_planes(planes, n);
 
-        for (int slot = 0; slot < 2; slot++) {
-            sb_hand_t hand;
-            if (sb_get_hand(receiver_, slot, &hand))
-                ingest_hand(slot, hand);
+        if (!injected) {
+            for (int slot = 0; slot < 2; slot++) {
+                sb_hand_t hand;
+                if (sb_get_hand(receiver_, slot, &hand))
+                    ingest_hand(slot, hand);
+            }
         }
 
         // After update_head, so the pose ring already carries the sample the
@@ -900,13 +907,77 @@ void scene::ingest_depth() {
     sb_free_depth(&d);
 }
 
-void scene::ingest_hand(int slot, const sb_hand_t &hand) {
+void scene::ingest_hand(int slot, const sb_hand_t &hand, bool already_scene) {
     for (int j = 0; j < SB_HAND_JOINT_COUNT; j++)
         if (!v3finite(hand.joints[j]))
             return;
     hand_raw_[slot] = hand;
-    hand_to_scene(hand_raw_[slot]);
+    if (!already_scene)
+        hand_to_scene(hand_raw_[slot]);
     hand_age_s_[slot] = 0.0f;
+}
+
+bool scene::adopt_injected_hands() {
+    if (!hand_inject_.fresh(hand_inject_now_ms()))
+        return false;
+    const injected_hands &inj = hand_inject_.hands();
+    for (int i = 0; i < inj.count; i++)
+        ingest_hand(i, inj.hands[i], true);
+    return true;
+}
+
+bool scene::hands_inject(const std::string &json, std::string &err) {
+    injected_hands parsed;
+    if (!parse_hands_inject(json, parsed, err))
+        return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    hand_inject_.set(parsed);
+    return true;
+}
+
+std::string scene::hands_source_status() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const uint64_t now = hand_inject_now_ms();
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "source=%s age_ms=%llu",
+                  hand_inject_.fresh(now) ? "mac" : "phone",
+                  (unsigned long long)hand_inject_.age_ms(now));
+    return buf;
+}
+
+std::string scene::hands_dump_json() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const uint64_t now = hand_inject_now_ms();
+    std::string out = "{\"source\":\"";
+    out += hand_inject_.fresh(now) ? "mac" : "phone";
+    out += "\",\"age_ms\":";
+    out += std::to_string((unsigned long long)hand_inject_.age_ms(now));
+    out += ",\"frame\":\"scene\",\"hands\":[";
+    bool first = true;
+    for (int slot = 0; slot < 2; slot++) {
+        if (hand_age_s_[slot] > HAND_STALE_S)
+            continue;
+        if (!first)
+            out += ',';
+        first = false;
+        char buf[96];
+        std::snprintf(buf, sizeof(buf),
+                      "{\"slot\":%d,\"age_s\":%.3f,\"joints\":[", slot,
+                      (double)hand_age_s_[slot]);
+        out += buf;
+        // MediaPipe landmark order, so a consumer can line these up with the
+        // mac tracker's own output without a second mapping table.
+        for (int mp = 0; mp < SB_HAND_JOINT_COUNT; mp++) {
+            const float *j = hand_raw_[slot].joints[mediapipe_to_sb_joint(mp)];
+            std::snprintf(buf, sizeof(buf), "%s[%.5f,%.5f,%.5f,%.3f]",
+                          mp ? "," : "", (double)j[0], (double)j[1],
+                          (double)j[2], (double)j[3]);
+            out += buf;
+        }
+        out += "]}";
+    }
+    out += "]}";
+    return out;
 }
 
 void scene::inject_gesture(const ge_event_t &ev) {

@@ -28,3 +28,8 @@ data/raw/
 *.task
 *.onnx
 models/
+# model weights (downloaded on first run)
+*.pt
+*.onnx
+.cache/
+agent/eval/fixtures/*.depth

@@ -120,6 +120,7 @@ set(RADIAL_MENU_SRC ${SPATULA_ROOT}/spatial-shell/radial-menu)
 add_library(scene_core STATIC
     src/core/anchor_math.cpp
     src/core/depth_cast.cpp
+    src/core/hand_inject.cpp
     src/core/json_lite.cpp
     src/core/layout_store.cpp
     src/core/scene.cpp
@@ -173,7 +174,8 @@ if(APPLE AND MAC_SHELL_RENDERER)
         src/platform/renderer_panels.mm src/platform/renderer_keyboard.mm
         src/platform/renderer_hands.mm src/platform/renderer_dock.mm
         src/platform/renderer_overlays.mm src/platform/app_main.mm
-        src/platform/capture.mm src/platform/png_write.mm)
+        src/platform/capture.mm src/platform/png_write.mm
+        src/platform/frame_export.mm)
     target_sources(mac-shell PRIVATE ${MAC_SHELL_RENDERER_SRC})
     set_source_files_properties(${MAC_SHELL_RENDERER_SRC} PROPERTIES
         COMPILE_OPTIONS "-fobjc-arc")

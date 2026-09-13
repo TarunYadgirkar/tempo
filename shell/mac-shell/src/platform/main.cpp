@@ -31,6 +31,7 @@
 
 #if defined(__APPLE__) && defined(MAC_SHELL_HAVE_RENDERER)
 #include "platform/capture.h"
+#include "platform/frame_export.h"
 #include "platform/renderer.h"
 #endif
 
@@ -179,6 +180,15 @@ int main(int argc, char **argv) {
     mac_shell::frame_grabber grabber;
 
 #if defined(__APPLE__) && defined(MAC_SHELL_HAVE_RENDERER)
+    // `frame-export on <dir>|off|status` — the camera/depth/pose tap the
+    // mac-side hand tracker reads (platform/frame_export.h). Wired in both
+    // modes: the renderer feeds it the frame it already decoded, and the
+    // headless tick loop below pulls one itself.
+    control.set_frame_export_handler([](const std::string &arg,
+                                        std::string &reply, std::string &err) {
+        return mac_shell::frame_export_verb(
+            mac_shell::frame_export_instance(), arg, reply, err);
+    });
     // Capture layer runs in both modes so the verb set stays uniform;
     // headless launch-app degrades to a test card (permission preflight
     // fails without a stable app identity / window server).
@@ -246,6 +256,21 @@ int main(int argc, char **argv) {
         last = now;
         retry.poll(std::chrono::duration<double>(now - boot_at).count());
         world.tick(dt);
+#if defined(__APPLE__) && defined(MAC_SHELL_HAVE_RENDERER)
+        // Headless has no renderer to consume camera frames, so the exporter
+        // does it here. Only while export is on: sb_get_latest_frame hands
+        // ownership over, and draining frames nobody looks at is pure waste.
+        if (mac_shell::frame_export_instance().enabled()) {
+            if (sb_receiver_t *r = receiver.load()) {
+                sb_frame_t frame;
+                if (sb_get_latest_frame(r, &frame)) {
+                    mac_shell::frame_export_instance().offer_frame(frame, world,
+                                                                   r);
+                    sb_free_frame(&frame);
+                }
+            }
+        }
+#endif
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 

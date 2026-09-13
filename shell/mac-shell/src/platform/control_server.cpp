@@ -716,6 +716,10 @@ void control_server::on_line(conn &c, const char *line) {
         return;
     }
     if (sub_verb("hands", arg)) {
+        if (arg == "dump") {
+            queue_ok_str(scene_.hands_dump_json());
+            return;
+        }
         if (arg == "overlay on" || arg == "overlay 1")
             scene_.set_hand_overlay(true);
         else if (arg == "overlay off" || arg == "overlay 0")
@@ -724,10 +728,29 @@ void control_server::on_line(conn &c, const char *line) {
             queue_err("parse_error", line);
             return;
         }
-        char rbuf[48];
-        std::snprintf(rbuf, sizeof(rbuf), "ok overlay=%s",
-                      scene_.hand_overlay() ? "on" : "off");
-        queue(rbuf);
+        queue_ok_str(std::string("overlay=") +
+                     (scene_.hand_overlay() ? "on" : "off") + " " +
+                     scene_.hands_source_status());
+        return;
+    }
+    if (sub_verb("hands-inject", arg)) {
+        std::string err;
+        if (scene_.hands_inject(arg, err))
+            queue_ok();
+        else
+            queue_err("bad_json", err.c_str());
+        return;
+    }
+    if (sub_verb("frame-export", arg)) {
+        if (!frame_export_) {
+            queue_err("unimplemented", "no frame source");
+            return;
+        }
+        std::string reply, err;
+        if (frame_export_(arg, reply, err))
+            queue_ok_str(reply);
+        else
+            queue_err(err.empty() ? "parse_error" : err.c_str(), line);
         return;
     }
     if (sub_verb("keyboard", arg)) {

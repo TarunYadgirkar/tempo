@@ -69,12 +69,57 @@ def cmd_scene(args: argparse.Namespace) -> None:
     print("view saved to last-view.jpg")
 
 
+def cmd_objects(args: argparse.Namespace) -> None:
+    from . import objects
+
+    prompts = [w.strip() for w in args.prompts.split(",")] if args.prompts else None
+
+    def once(image: Path, meta: dict, base: Path | None = None) -> None:
+        located, ms = objects.process_frame(image, meta, base, args.backend, prompts, args.conf)
+        print(f"[{ms:.0f} ms · {len(located)} detections · {args.backend}]")
+        for d in sorted(located, key=lambda d: -d["confidence"]):
+            pos = " ".join(f"{v:+.2f}" for v in d["position_m"])
+            print(f"  · {d['label']:<11} {d['confidence']:.2f}  at [{pos}] m  ~{d['size_m_estimate']:.2f} m  ({d['source']})")
+        for t in objects.snapshot():
+            if t["unseen_s"] > 1.0:
+                print(f"  remembered: {t['label']} at {t['position_m']} ({t['unseen_s']}s ago)")
+
+    if args.frames:
+        seen = None
+        while True:
+            frame = objects.read_export(args.frames)
+            if frame and frame[1].get("t_ms") != seen:
+                seen = frame[1].get("t_ms")
+                once(frame[0], frame[1], Path(args.frames))
+                if args.once:
+                    return
+            elif not frame:
+                print(f"waiting for {args.frames}/latest.jpg", end="\r")
+            time.sleep(0.15)
+
+    if args.image:
+        once(*objects.read_pair(args.image, args.meta))
+        return
+
+    shell = Shell()
+    while True:
+        once(Path(shell.screenshot()), {"head": shell.head_pose()})
+        if args.once:
+            return
+
+
 def cmd_eval(args: argparse.Namespace) -> None:
     from .eval import run, summarize
 
     for condition in args.conditions:
         trials = run(condition, args.limit)
         print(condition, summarize(trials))
+
+
+def objects_backend() -> str:
+    from .objects import DEFAULT_BACKEND
+
+    return DEFAULT_BACKEND
 
 
 def main() -> None:
@@ -91,6 +136,15 @@ def main() -> None:
     lv.add_argument("--quiet", action="store_true")
     lv.set_defaults(fn=cmd_live)
     sub.add_parser("scene", help="dump what the agent would see").set_defaults(fn=cmd_scene)
+    o = sub.add_parser("objects", help="detect and track room objects in 3D")
+    o.add_argument("image", nargs="?", help="image to run on; omit to pull frames from the live shell")
+    o.add_argument("--meta", help="sidecar json with head pose, intrinsics, depth (default: <image>.json)")
+    o.add_argument("--frames", help="frame export directory written by the shell (latest.jpg + latest.json)")
+    o.add_argument("--once", action="store_true", help="one frame instead of a loop")
+    o.add_argument("--backend", default=objects_backend(), choices=["owlv2", "owlvit"], help="owlv2 is more accurate, owlvit is ~7x faster")
+    o.add_argument("--prompts", help="comma separated vocabulary (default: common room objects)")
+    o.add_argument("--conf", type=float, default=0.12)
+    o.set_defaults(fn=cmd_objects)
     e = sub.add_parser("eval", help="run the fixed request set")
     e.add_argument("conditions", nargs="*", default=["geometry", "pixels"])
     e.add_argument("--limit", type=int)

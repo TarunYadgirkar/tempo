@@ -84,6 +84,18 @@ class control_server {
         window_shot_ = std::move(fn);
     }
 
+    // `frame-export on <dir> | off | status`: publish the live camera frame,
+    // its depth map and the pose it was taken under into a directory, for a
+    // vision process outside the shell (platform/frame_export.h). The handler
+    // takes the raw argument tail, fills `reply` with the "k=v" tail of an ok
+    // line, and on refusal returns false with a one-word `err` code. Unset →
+    // err unimplemented.
+    using frame_export_fn = std::function<bool(
+        const std::string &arg, std::string &reply, std::string &err)>;
+    void set_frame_export_handler(frame_export_fn fn) {
+        frame_export_ = std::move(fn);
+    }
+
    private:
     struct conn;
 
@@ -113,6 +125,7 @@ class control_server {
     status_fn stats_;
     screenshot_fn screenshot_;
     window_shot_fn window_shot_;
+    frame_export_fn frame_export_;
     std::string sock_path_;
     std::string error_;
     int listen_fd_ = -1;

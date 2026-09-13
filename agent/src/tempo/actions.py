@@ -10,8 +10,9 @@ from .memory import Memory, relative_direction
 from .perception import Snapshot
 from .shell import Shell, ShellError
 
-WHERE = ["in_front", "left", "right", "on_table", "on_wall", "where_looking", "where_pointing"]
+WHERE = ["in_front", "left", "right", "on_table", "on_wall", "where_looking", "where_pointing", "near_object"]
 PANEL_GAP_M = 0.45
+OBJECT_STANDOFF_M = 0.25  # how far in front of a detected object its panel floats
 
 
 def _where_schema(desc: str) -> types.Schema:
@@ -27,7 +28,8 @@ DECLARATIONS = [
             properties={
                 "title": types.Schema(type=types.Type.STRING, description="Two to four word title."),
                 "body": types.Schema(type=types.Type.STRING, description="The note text, one to three short sentences."),
-                "where": _where_schema("Where to put it. Use where_pointing when the wearer's hand is pointing at something; where_looking for 'here' or 'there'."),
+                "where": _where_schema("Where to put it. Use near_object when the request names a physical object the scene's objects list knows; where_pointing when the wearer's hand is pointing at something; where_looking for 'here' or 'there'."),
+                "object": types.Schema(type=types.Type.STRING, description="Required when where is near_object: the object to put it beside, e.g. lamp, monitor, plant. Must be one of the labels in the scene's objects list."),
             },
             required=["title", "body", "where"],
         ),
@@ -39,7 +41,8 @@ DECLARATIONS = [
             type=types.Type.OBJECT,
             properties={
                 "app": types.Schema(type=types.Type.STRING, description="App name as the user says it, e.g. Safari, Notes, Terminal, Spotify."),
-                "where": _where_schema("Where to put the panel."),
+                "where": _where_schema("Where to put the panel. near_object puts it beside a physical object from the scene's objects list."),
+                "object": types.Schema(type=types.Type.STRING, description="Required when where is near_object: the object to put it beside, e.g. lamp, monitor, plant. Must be one of the labels in the scene's objects list."),
             },
             required=["app", "where"],
         ),
@@ -245,7 +248,23 @@ class Executor:
             return None
         return hit
 
-    def _place(self, handle: int, where: str) -> None:
+    def _object_pose(self, name: str) -> tuple[spatial.Vec3, spatial.Quat] | None:
+        """Standing 25 cm in front of a tracked object, upright, square to the viewer."""
+        from . import objects
+
+        viewer = self.snap.head["scene_pos"]
+        found = objects.nearest(name, viewer)
+        if not found:
+            return None
+        pos = found["position_m"]
+        toward_viewer = spatial.normalize(spatial.sub(viewer, pos))
+        return spatial.surface_pose(pos, toward_viewer, viewer, lift_m=OBJECT_STANDOFF_M)
+
+    def _place(self, handle: int, where: str, obj: str | None = None) -> None:
+        if where == "near_object" and obj:
+            pose = self._object_pose(obj)
+            if pose and self.shell.pose(handle, *pose):
+                return
         hit = self._surface_hit(where)
         if hit:
             pos, quat = spatial.surface_pose(hit["hit"], hit["normal"], self.snap.head["scene_pos"])
@@ -257,16 +276,16 @@ class Executor:
         elif where in ("on_wall", "where_looking", "where_pointing"):
             self.shell.anchor(handle, "closest-wall")
 
-    def _do_place_note(self, out: Outcome, title: str, body: str, where: str) -> str:
+    def _do_place_note(self, out: Outcome, title: str, body: str, where: str, object: str | None = None) -> str:
         handle = self.shell.note(title, body, accent=True)
-        self._place(handle, where)
-        return f"note #{handle} {title!r} -> {where}"
+        self._place(handle, where, object)
+        return f"note #{handle} {title!r} -> {where}{f' ({object})' if object else ''}"
 
-    def _do_open_app(self, out: Outcome, app: str, where: str) -> str:
+    def _do_open_app(self, out: Outcome, app: str, where: str, object: str | None = None) -> str:
         target = APP_ALIASES.get(app.lower().strip(), app)
         handle = self.shell.launch_app(target)
-        self._place(handle, where)
-        return f"app {app} #{handle} -> {where}"
+        self._place(handle, where, object)
+        return f"app {app} #{handle} -> {where}{f' ({object})' if object else ''}"
 
     def _do_move_panel(self, out: Outcome, handle: int, where: str) -> str:
         self._place(int(handle), where)

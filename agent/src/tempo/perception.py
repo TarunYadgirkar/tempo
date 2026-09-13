@@ -25,6 +25,15 @@ class Snapshot:
     aim: dict[str, Any]
     taken_at: float
 
+    def objects(self) -> list[dict[str, Any]]:
+        """Tracked room objects, or nothing at all if the detector is unavailable."""
+        try:
+            from . import objects
+
+            return objects.snapshot()
+        except Exception:
+            return []
+
     def scene_text(self) -> str:
         head_pos = [round(v, 2) for v in self.head["scene_pos"]]
         fwd = [round(v, 2) for v in spatial.head_forward(self.head)]
@@ -46,6 +55,7 @@ class Snapshot:
                 "tracking": self.head["tracking"],
                 "surfaces": spatial.describe_planes(self.planes, self.head),
                 "panels": panels,
+                "objects": self.objects(),
                 "remembered_places": Memory().describe_for(self.head),
                 "hand": {
                     "visible": self.aim["hands"] > 0,

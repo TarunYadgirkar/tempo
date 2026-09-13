@@ -6,6 +6,7 @@
 // spring constants), instanced keyboard keycaps with press depression,
 // hand joints/bones as sphere/capsule impostors, and the Vantage HUD.
 
+#include "platform/frame_export.h"
 #include "platform/renderer_internal.h"
 
 #include <SystemConfiguration/SystemConfiguration.h>
@@ -506,6 +507,10 @@ void bonjour_browse_reply(DNSServiceRef, DNSServiceFlags flags, uint32_t,
     _passthrough_tex = slot;
     _passthrough_ts = frame.timestamp_ns;
     _have_frame = true;
+    // `frame-export`: the same decoded frame, published for the mac-side
+    // hand tracker. No-op (one atomic load) while export is off.
+    mac_shell::frame_export_instance().offer_frame(frame, *_s->world,
+                                                   _s->receiver);
     sb_free_frame(&frame);
 }
 

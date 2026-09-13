@@ -22,6 +22,7 @@
 
 #include "core/anchor_math.h"
 #include "core/depth_cast.h"
+#include "core/hand_inject.h"
 #include "core/hud_state.h"
 #include "core/layout_store.h"
 #include "ui/keyboard_overlay.h"
@@ -194,6 +195,22 @@ class scene {
     // SPATULA_MAC_HAND_DEBUG, flipped live by `hands overlay on|off`.
     void set_hand_overlay(bool on);
     bool hand_overlay() const;
+
+    // ---- mac-side hand tracking (control verb `hands-inject`) ----
+    // Adopt one frame of joints tracked on the Mac (MediaPipe over the
+    // exported camera frames, core/hand_inject.h). They are already SCENE
+    // frame, and they take over from the phone's 0x05 hands for as long as
+    // they keep arriving — HAND_INJECT_FRESH_MS without one and the phone's
+    // hands come straight back, so a tracker that dies degrades instead of
+    // freezing the user's hands in mid-air.
+    bool hands_inject(const std::string &json, std::string &err);
+    // "source=phone|mac age_ms=<n>" for `hands status`. age_ms is the age of
+    // the last injection (0 when there has never been one).
+    std::string hands_source_status() const;
+    // `hands dump`: the joints the gesture engine is seeing right now, in
+    // SB_JOINT_* order and the scene frame, tagged with which source they
+    // came from. This is the phone-side half of the eval harness.
+    std::string hands_dump_json() const;
 
     // ---- virtual keyboard ----
     // show anchors to the nearest horizontal plane (else floating default);
@@ -381,7 +398,13 @@ class scene {
     bool head_pose_at_locked(uint64_t ts_ns, float out_pos[3],
                              float out_quat[4], float *out_lag_ms) const;
     // Adopts a hand into slot if every joint is finite. mutex_ held.
-    void ingest_hand(int slot, const sb_hand_t &hand);
+    // `already_scene` skips the ARKit-world -> scene rewrite, for joints a
+    // mac-side tracker already resolved into the scene frame.
+    void ingest_hand(int slot, const sb_hand_t &hand,
+                     bool already_scene = false);
+    // Feeds the latest `hands-inject` into hand_raw_ when it is still fresh.
+    // False (phone hands stay in charge) otherwise. mutex_ held.
+    bool adopt_injected_hands();
     uint64_t spawn_panel_impl(const std::string &app_id,
                               const std::string &title);
     // Head-relative spawn placement (falls back to the legacy shelf when no
@@ -452,6 +475,7 @@ class scene {
     bool launcher_hand_left_ = false;
     sb_hand_t hand_raw_[2] = {};    // scene-frame joints for render/introspect
     float hand_age_s_[2] = {1e9f, 1e9f};
+    hand_inject_store hand_inject_;
 
     keyboard_overlay keyboard_;
     launcher_menu launcher_;
