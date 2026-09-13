@@ -73,6 +73,8 @@ echo 'GEMINI_API_KEY=...' > .env
 uv run tempo scene                          # what the agent sees right now
 uv run tempo ask put a note on the desk that says buy milk
 uv run tempo --speak listen                 # push-to-talk loop
+uv run tempo people --frames "$TMPDIR/spatula-frames"   # faces + voices, a bubble beside each head
+uv run tempo people me Tarun                # 6 s of your own voice so your speech is never filed under a guest
 ```
 
 Without a phone: `SPATULA_MAC_HEADLESS=1 shell/build/mac-shell/mac-shell --replay shell/tests/recorded-sessions/initial.bin` replays a recorded session so `head-pose` and `list-planes` work (screenshot needs the windowed renderer).
@@ -86,6 +88,7 @@ Without a phone: `SPATULA_MAC_HEADLESS=1 shell/build/mac-shell/mac-shell --repla
 | # | When (PT) | State | What changed | Where feedback helps |
 |---|---|---|---|---|
 | 1 | Sat Sep 12, midnight | Live end to end: spoken or typed request → Gemini → note or app panel placed on the real surface, 3 to 4 s per request. Objects, remembered places, layouts, pinch-and-talk, Mac-side hand tracking all running on the rig. Two eval runs below. | Compositor base ported (31 shell tests). New today: the agent and its tools, note panels, depth ray-cast + full pose placement, floor and roll, OWL-ViT object map with LiDAR depth, spatial memory, layouts, local Whisper pinch-and-talk, RTMPose hands fused with LiDAR (77 tests), the placement eval, the hand-tracking eval. | Hand tracking: the Mac path matches the phone on detection but not yet on jitter; is the LiDAR-anchored shape model the right next step, or should we push frames to a cloud GPU running a mesh model (WiLoR) and eat the round trip? |
+| 2 | Sun Sep 13, noon | Fist opens the launcher, pinch clicks; launched windows now land in a free slot in front of the wearer, take focus, and re-launching recalls instead of duplicating. Phantom hands past arm's reach are gated out of the Mac tracker. People layer: faces and voices in the room, a bubble beside each head with name and what they last said, names taken from speech. | `hands` range/confidence gate; shell spawn placement with depth pull-in, focus on spawn, `recall_panel`; `tempo people` (YuNet + ArcFace, mlx-whisper + ECAPA, siyi lookup), people in the scene JSON. | Is a bubble beside the head the right surface for people context, or should it live in the wearer's periphery until asked? What context is fair to show next to a face? |
 
 ### Checkpoint 1 result, and why the geometry condition lost
 
