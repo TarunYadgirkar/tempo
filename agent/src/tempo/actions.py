@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from google.genai import types
 
 from . import spatial
+from .memory import Memory, relative_direction
 from .perception import Snapshot
 from .shell import Shell, ShellError
 
@@ -68,6 +69,48 @@ DECLARATIONS = [
         name="gather_panels",
         description="Bring every panel back in front of the wearer. Use when they say they lost their windows.",
         parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    ),
+    types.FunctionDeclaration(
+        name="remember_place",
+        description="Save a named spot in the room: where the wearer is pointing, or looking, or a panel's location. Use when they say 'remember this is X' or 'this is where I keep X'.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "label": types.Schema(type=types.Type.STRING, description="Short name, e.g. 'charger', 'keys', 'reading spot'."),
+                "where": _where_schema("where_pointing if their hand is visible, else where_looking."),
+            },
+            required=["label", "where"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="recall_place",
+        description="Find a remembered spot by name, tell the wearer where it is relative to them, and optionally drop a marker note there.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "label": types.Schema(type=types.Type.STRING),
+                "mark": types.Schema(type=types.Type.BOOLEAN, description="Put a small marker note at the spot."),
+            },
+            required=["label"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="save_layout",
+        description="Save every panel's position under a name, e.g. 'desk' or 'bed', so it can be restored later.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={"name": types.Schema(type=types.Type.STRING, description="Letters, digits, dashes only.")},
+            required=["name"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="restore_layout",
+        description="Bring back a saved panel layout by name.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={"name": types.Schema(type=types.Type.STRING)},
+            required=["name"],
+        ),
     ),
     types.FunctionDeclaration(
         name="say",
@@ -139,9 +182,10 @@ class Outcome:
 
 
 class Executor:
-    def __init__(self, shell: Shell, snap: Snapshot) -> None:
+    def __init__(self, shell: Shell, snap: Snapshot, memory: Memory | None = None) -> None:
         self.shell = shell
         self.snap = snap
+        self.memory = memory or Memory()
         self.placed = 0
 
     def run(self, calls: list[types.FunctionCall]) -> Outcome:
@@ -248,6 +292,36 @@ class Executor:
         handle = self.shell.launch_app(APP_ALIASES.get(app.lower().strip(), app))
         self.shell.move(handle, self._offset(forward_m, right_m, up_m))
         return f"app {app} #{handle} @ f={forward_m} r={right_m} u={up_m}"
+
+    def _spot(self, where: str) -> tuple[spatial.Vec3, str]:
+        hit = self._surface_hit(where)
+        if hit:
+            return tuple(hit["hit"]), hit.get("kind", "surface")
+        return self._target(where), "air"
+
+    def _do_remember_place(self, out: Outcome, label: str, where: str) -> str:
+        pos, kind = self._spot(where)
+        self.memory.remember(label, pos, kind)
+        return f"remembered {label!r} at {[round(v, 2) for v in pos]} ({kind})"
+
+    def _do_recall_place(self, out: Outcome, label: str, mark: bool = False) -> str:
+        place = self.memory.find(label)
+        if place is None:
+            out.spoken = f"I don't have a spot called {label}."
+            return f"no memory for {label!r}"
+        phrase = relative_direction(self.snap.head, place.pos)
+        if mark:
+            handle = self.shell.note(place.label, f"Here: {phrase}", accent=True)
+            _, quat = spatial.surface_pose(place.pos, spatial.sub(self.snap.head["scene_pos"], place.pos), self.snap.head["scene_pos"], lift_m=0.0)
+            self.shell.pose(handle, spatial.add(place.pos, (0, 0.15, 0)), quat)
+        out.spoken = f"{place.label} is {phrase}."
+        return f"recalled {label!r}: {phrase}"
+
+    def _do_save_layout(self, out: Outcome, name: str) -> str:
+        return "layout " + self.shell.layout_save(name)
+
+    def _do_restore_layout(self, out: Outcome, name: str) -> str:
+        return "layout " + self.shell.layout_load(name)
 
     def _do_say(self, out: Outcome, text: str) -> str:
         out.spoken = text

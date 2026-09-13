@@ -288,6 +288,53 @@ static void test_plane_fallback(ctl_client &c) {
     CHECK(contains(c.request("cast 0 0 0"), "err parse_error"));
     CHECK(contains(c.request("cast 0 0 0 0 -1 -1 extra"), "err parse_error"));
     CHECK(contains(c.request("cast nope"), "err parse_error"));
+
+    // `floor` falls back to the plane list for the same reason `cast` does.
+    r = c.request("floor");
+    std::fprintf(stderr, "floor (planes only): %s\n", r.c_str());
+    CHECK_MSG(contains(r, "\"source\":\"plane\""), r.c_str());
+    float h = 0.0f;
+    CHECK(std::sscanf(r.c_str(), "ok {\"height\":%f", &h) == 1);
+    CHECK_MSG(std::fabs(h - FLOOR_Y) < 0.02f, r.c_str());
+}
+
+static void test_pose_verb(ctl_client &c) {
+    std::string r = c.request(R"(note {"title":"Posed","body":"Lying flat."})");
+    CHECK_MSG(r == "ok handle=1", r.c_str());
+
+    // Half a turn about +Y.
+    CHECK(c.request("pose 1 0.25 -0.3 -1.2 0 1 0 0") == "ok");
+    std::string lw = c.request("list-windows");
+    std::fprintf(stderr, "list-windows after pose: %s\n", lw.c_str());
+    CHECK_MSG(contains(lw, "\"quat\":[0,1,0,0]") ||
+                  contains(lw, "\"quat\":[-0,1,0,0]") ||
+                  contains(lw, "\"quat\":[0,-1,0,0]"),
+              lw.c_str());
+    float pos[3] = {0, 0, 0};
+    CHECK(field_vec3(lw, "pos", pos));
+    CHECK_MSG(std::fabs(pos[0] - 0.25f) < 1e-3f, lw.c_str());
+    CHECK_MSG(std::fabs(pos[2] - (-1.2f)) < 1e-3f, lw.c_str());
+
+    CHECK(c.request("pose 99 0 0 -1 0 0 0 1") == "err no_such_window");
+    CHECK(contains(c.request("pose 1 0 0 -1 0 0 0 0"), "err bad_quat"));
+    CHECK(contains(c.request("pose 1 0 0 -1"), "err parse_error"));
+    CHECK(contains(c.request("pose"), "err parse_error"));
+
+    // head-pose carries the gravity roll; the replayed pose is identity, so
+    // the phone reads level.
+    std::string hp = c.request("head-pose");
+    std::fprintf(stderr, "head-pose: %s\n", hp.c_str());
+    CHECK_MSG(contains(hp, "\"roll_deg\":"), hp.c_str());
+    float roll = 1e9f;
+    size_t at = hp.find("\"roll_deg\":");
+    CHECK(at != std::string::npos);
+    CHECK(std::sscanf(hp.c_str() + at + 11, "%f", &roll) == 1);
+    CHECK_MSG(std::fabs(roll) < 0.5f, hp.c_str());
+}
+
+static void test_plane_session(ctl_client &c) {
+    test_plane_fallback(c);
+    test_pose_verb(c);
 }
 
 static void test_depth_source(ctl_client &c) {
@@ -307,6 +354,14 @@ static void test_depth_source(ctl_client &c) {
     CHECK_MSG(contains(r, "\"kind\":\"horizontal\""), r.c_str());
     CHECK_MSG(field_vec3(r, "hit", hit), r.c_str());
     CHECK_MSG(std::fabs(hit[1] - FLOOR_Y) < 0.06f, r.c_str());
+
+    // The floor comes off the depth map too, and agrees with the plane list.
+    r = c.request("floor");
+    std::fprintf(stderr, "floor (with depth): %s\n", r.c_str());
+    CHECK_MSG(contains(r, "\"source\":\"depth\""), r.c_str());
+    float h = 0.0f;
+    CHECK(std::sscanf(r.c_str(), "ok {\"height\":%f", &h) == 1);
+    CHECK_MSG(std::fabs(h - FLOOR_Y) < 0.08f, r.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +446,7 @@ int main() {
     CHECK(write_session(deep, true));
 
     run_session(plain, dir + "/mac-shell-cast-a-" + tag + ".sock",
-                test_plane_fallback);
+                test_plane_session);
     run_session(deep, dir + "/mac-shell-cast-b-" + tag + ".sock",
                 test_depth_source);
 

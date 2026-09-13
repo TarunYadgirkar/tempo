@@ -50,6 +50,15 @@ static int g_failures = 0;
         }                                                                 \
     } while (0)
 
+#define CHECK_MSG(cond, msg)                                                  \
+    do {                                                                      \
+        if (!(cond)) {                                                        \
+            std::fprintf(stderr, "FAIL %s:%d: %s (%s)\n", __FILE__, __LINE__, \
+                         #cond, (msg));                                       \
+            g_failures++;                                                     \
+        }                                                                     \
+    } while (0)
+
 #define CHECK_NEAR(a, b, eps)                                                 \
     do {                                                                      \
         float va = (a), vb = (b);                                             \
@@ -1084,6 +1093,146 @@ static void test_ray_picks_nearest_rotated_surface() {
     CHECK(s.aim_handle() == front);
 }
 
+
+// `pose`: a full orientation survives the per-tick transform rebuild, shows up
+// in list-windows' quat, and takes the panel off its anchor.
+static void test_pose_panel() {
+    scene s;
+    s.inject_pose(identity_pose());
+    sb_plane_t desk =
+        make_plane(0x11, 0.0f, -0.8f, -1.0f, 0, 1, 0, 2.0f, 1.2f, 0);
+    s.inject_planes(&desk, 1);
+
+    uint64_t h = s.spawn_panel("test-card", "posed");
+    // Half a turn about +Y: the panel's face (+Z) now looks along -Z.
+    const float pos[3] = {0.2f, -0.1f, -1.4f};
+    const float half_turn[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+    CHECK(s.pose_panel(h, pos, half_turn));
+
+    float m[16];
+    CHECK(s.panel_matrix(h, m));
+    CHECK_NEAR(m[8], 0.0f, 1e-5f);    // front.x
+    CHECK_NEAR(m[10], -1.0f, 1e-5f);  // front.z
+    CHECK_NEAR(m[12], 0.2f, 1e-6f);
+    CHECK_NEAR(m[14], -1.4f, 1e-6f);
+
+    // The yaw rebuild runs every tick for unanchored panels; the explicit
+    // orientation must outlast it.
+    tick_n(s, 5);
+    CHECK(s.panel_matrix(h, m));
+    CHECK_NEAR(m[10], -1.0f, 1e-5f);
+
+    std::string lw = s.windows_json(false);
+    CHECK_MSG(lw.find("\"quat\":[0,1,0,0]") != std::string::npos ||
+                  lw.find("\"quat\":[0,-1,0,0]") != std::string::npos ||
+                  lw.find("\"quat\":[-0,1,0,0]") != std::string::npos,
+              lw.c_str());
+
+    // A non-axis-aligned orientation: tilted back 90 deg about +X, the panel
+    // lies flat with its face up.
+    const float tilt[4] = {-0.7071068f, 0.0f, 0.0f, 0.7071068f};
+    CHECK(s.pose_panel(h, pos, tilt));
+    tick_n(s, 2);
+    CHECK(s.panel_matrix(h, m));
+    CHECK_NEAR(m[9], 1.0f, 1e-4f);  // front.y — face points at the ceiling
+
+    // An un-normalised quaternion is accepted (and normalised); a zero one is
+    // not, and neither is an unknown handle.
+    const float unnormalised[4] = {0.0f, 2.0f, 0.0f, 0.0f};
+    CHECK(s.pose_panel(h, pos, unnormalised));
+    const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    CHECK(!s.pose_panel(h, pos, zero));
+    CHECK(!s.pose_panel(9999, pos, tilt));
+
+    // Anchoring then posing: the pose wins and the anchor is dropped.
+    uint8_t out_uuid[16];
+    const float near_desk[3] = {0.0f, -0.78f, -1.0f};
+    CHECK(s.move_panel(h, near_desk, false));
+    CHECK(s.anchor_panel(h, 2, nullptr, out_uuid) == 1);
+    CHECK(s.pose_panel(h, pos, tilt));
+    CHECK(s.query_anchor(h, out_uuid) == 0);
+    tick_n(s, 3);
+    CHECK(s.panel_matrix(h, m));
+    CHECK_NEAR(m[9], 1.0f, 1e-4f);
+
+    // gather re-derives a facing yaw, which retires the explicit orientation.
+    CHECK(s.gather_panels() >= 1);
+    tick_n(s, 2);
+    CHECK(s.panel_matrix(h, m));
+    CHECK_NEAR(m[5], 1.0f, 1e-4f);  // up is +Y again
+}
+
+// `floor`: with no depth map, the lowest horizontal plane answers.
+static void test_floor_from_planes() {
+    scene s;
+    s.inject_pose(identity_pose());
+
+    std::string r = s.floor_json();
+    CHECK_MSG(r == "{\"height\":null,\"source\":\"none\"}", r.c_str());
+
+    sb_plane_t planes[3] = {
+        make_plane(0x11, 0.0f, -0.75f, -1.0f, 0, 1, 0, 1.4f, 0.7f, 0),  // desk
+        make_plane(0x12, 0.0f, -1.35f, -1.5f, 0, 1, 0, 3.0f, 3.0f, 0),  // floor
+        make_plane(0x13, 0.0f, 0.0f, -2.5f, 0, 0, 1, 3.0f, 2.4f, 1),    // wall
+    };
+    s.inject_planes(planes, 3);
+    tick_n(s, 2);
+
+    r = s.floor_json();
+    CHECK_MSG(r.find("\"source\":\"plane\"") != std::string::npos, r.c_str());
+    float h = 0.0f;
+    CHECK(std::sscanf(r.c_str(), "{\"height\":%f", &h) == 1);
+    CHECK_NEAR(h, -1.35f, 1e-4f);  // the floor, not the desk above it
+
+    // A wall alone is not a floor.
+    s.inject_planes(&planes[2], 1);
+    tick_n(s, 2);
+    r = s.floor_json();
+    CHECK_MSG(r == "{\"height\":null,\"source\":\"none\"}", r.c_str());
+}
+
+// head-pose's roll_deg: 0 level, +/-90 portrait, null looking straight down.
+static void test_head_pose_roll() {
+    scene s;
+    std::string r = s.head_pose_json();
+    CHECK_MSG(r.find("\"roll_deg\":null") != std::string::npos, r.c_str());
+
+    auto roll_of = [&](const float q[4]) {
+        sb_pose_t p = identity_pose();
+        for (int i = 0; i < 4; i++)
+            p.rot[i] = q[i];
+        s.inject_pose(p);
+        std::string j = s.head_pose_json();
+        float deg = 1e9f;
+        size_t at = j.find("\"roll_deg\":");
+        if (at == std::string::npos)
+            return 1e9f;
+        if (j.compare(at + 11, 4, "null") == 0)
+            return std::numeric_limits<float>::quiet_NaN();
+        std::sscanf(j.c_str() + at + 11, "%f", &deg);
+        return deg;
+    };
+
+    const float level[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    CHECK_NEAR(roll_of(level), 0.0f, 1e-3f);
+
+    // Roll about the camera's own forward (-Z) axis by +90 deg: portrait.
+    const float sq = 0.7071068f;
+    const float roll_pos[4] = {0.0f, 0.0f, sq, sq};
+    const float roll_neg[4] = {0.0f, 0.0f, -sq, sq};
+    CHECK_NEAR(std::fabs(roll_of(roll_pos)), 90.0f, 0.1f);
+    CHECK_NEAR(std::fabs(roll_of(roll_neg)), 90.0f, 0.1f);
+    CHECK(roll_of(roll_pos) * roll_of(roll_neg) < 0.0f);  // opposite signs
+
+    const float upside_down[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+    CHECK_NEAR(std::fabs(roll_of(upside_down)), 180.0f, 0.1f);
+
+    // Pitched 90 deg down: gravity runs along the optical axis and roll is
+    // genuinely undefined rather than zero.
+    const float looking_down[4] = {-sq, 0.0f, 0.0f, sq};
+    CHECK(std::isnan(roll_of(looking_down)));
+}
+
 int main() {
     test_ray_picks_nearest_rotated_surface();
     test_aim_ignores_unreliable_fingertips();
@@ -1107,6 +1256,9 @@ int main() {
     test_pinch_outside_quad_focuses_only();
     test_pinch_right_click();
     test_aim_handle_tracks_candidate();
+    test_pose_panel();
+    test_floor_from_planes();
+    test_head_pose_roll();
 
     if (g_failures) {
         std::fprintf(stderr, "test_scene: %d FAILURES\n", g_failures);

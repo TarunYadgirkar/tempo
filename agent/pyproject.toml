@@ -8,10 +8,15 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "google-genai>=2.23.0",
+    "mlx-whisper>=0.4.3",
     "numpy>=2.5.3",
     "pillow>=12.3.0",
     "python-dotenv>=1.2.3",
     "sounddevice>=0.5.6",
+    "torch>=2.14.0",
+    "torchvision>=0.29.0",
+    "transformers>=5.17.0",
+    "ultralytics>=8.4.150",
 ]
 
 [project.scripts]

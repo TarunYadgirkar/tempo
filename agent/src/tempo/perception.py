@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image
 
 from . import spatial
+from .memory import Memory
 from .shell import Shell
 
 VIEW_WIDTH_PX = 1024
@@ -45,6 +46,7 @@ class Snapshot:
                 "tracking": self.head["tracking"],
                 "surfaces": spatial.describe_planes(self.planes, self.head),
                 "panels": panels,
+                "remembered_places": Memory().describe_for(self.head),
                 "hand": {
                     "visible": self.aim["hands"] > 0,
                     "pointing_at_m": [round(v, 2) for v in self.aim["hit"]] if self.aim.get("hit") else None,

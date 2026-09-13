@@ -177,6 +177,46 @@ void test_kind_buckets() {
     CHECK(std::string(mac_shell::surface_kind(ceiling)) == "horizontal");
 }
 
+void test_floor_height() {
+    std::vector<float> buf;
+    mac_shell::depth_cast_input in = make_room(buf);
+
+    float y = 0.0f;
+    CHECK(mac_shell::depth_floor_height(in, y));
+    CHECK_NEAR(y, FLOOR_Y, 0.03f);
+
+    // A desk slab hung above part of the floor must not raise the answer:
+    // the LOWEST upward-facing cluster is the floor.
+    std::vector<float> desk = buf;
+    mac_shell::depth_cast_input with_desk = in;
+    const float DESK_Y = -0.35f;
+    for (int py = 0; py < H; py++) {
+        for (int px = 0; px < W / 3; px++) {
+            float ry = -((float)py + 0.5f - with_desk.intr.cy) / with_desk.intr.fy;
+            if (ry >= -1e-6f)
+                continue;
+            float d_desk = DESK_Y / ry;
+            if (d_desk < desk[(size_t)py * W + (size_t)px])
+                desk[(size_t)py * W + (size_t)px] = d_desk;
+        }
+    }
+    with_desk.depth = desk.data();
+    CHECK(mac_shell::depth_floor_height(with_desk, y));
+    CHECK_NEAR(y, FLOOR_Y, 0.03f);
+
+    // Wall only: nothing faces up, so there is no floor to report.
+    std::vector<float> wall_only((size_t)W * H, 2.0f);
+    mac_shell::depth_cast_input wall = in;
+    wall.depth = wall_only.data();
+    CHECK(!mac_shell::depth_floor_height(wall, y));
+
+    // An empty map answers no rather than guessing.
+    std::vector<float> blank((size_t)W * H, 0.0f);
+    mac_shell::depth_cast_input empty = in;
+    empty.depth = blank.data();
+    CHECK(!mac_shell::depth_floor_height(empty, y));
+}
+
 }  // namespace
 
 int main() {
@@ -185,6 +225,7 @@ int main() {
     test_no_hit();
     test_offset_origin();
     test_kind_buckets();
+    test_floor_height();
     if (g_failures) {
         std::fprintf(stderr, "depth_cast: %d failure(s)\n", g_failures);
         return 1;

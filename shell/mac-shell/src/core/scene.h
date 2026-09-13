@@ -68,6 +68,12 @@ struct panel {
     // full plane transform.
     float pos[3] = {0.0f, 0.0f, 0.0f};
     float yaw = 0.0f;
+    // `pose` verb: a full orientation, which yaw alone cannot express (a
+    // panel tilted back on a desk, a panel lying flat). Set, it replaces the
+    // yaw rebuild every tick; cleared by anything that re-derives a yaw
+    // (gather, layout load) or by taking an anchor.
+    bool has_pose_quat = false;
+    float pose_quat[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     float m[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     // Hand-driven motion (grab) accumulates here behind the grab deadband;
     // pos follows it directly. Smoothing is the renderer's single move
@@ -151,6 +157,11 @@ class scene {
         std::function<void(uint64_t handle, int32_t pid, const inject_event &)>;
     void set_input_injector(injector_fn fn);
     bool move_panel(uint64_t handle, const float vec[3], bool relative);
+    // `pose` verb: full scene-frame placement. `quat` (xyzw) orients the
+    // panel's own basis — its +Z is the face that looks at the viewer, so
+    // identity is a panel facing +Z. Drops any anchor, since an explicit pose
+    // is a statement that this panel is no longer following a plane.
+    bool pose_panel(uint64_t handle, const float pos[3], const float quat[4]);
     // mode: 0 = explicit uuid, 1 = closest wall, 2 = closest horizontal.
     // Returns 1 anchored (out_uuid filled), 0 no_anchor, -1 no such window.
     int anchor_panel(uint64_t handle, int mode, const uint8_t uuid[16],
@@ -228,6 +239,12 @@ class scene {
     // the desk ARKit's plane list missed); the plane list is the fallback,
     // and `source` says which — "depth", "plane", or "none" with nulls.
     std::string cast_json(const float *origin, const float *dir) const;
+
+    // `floor` verb: the lowest horizontal surface currently observed, as a
+    // scene-frame height. `{"height":y|null,"source":"depth|plane|none"}` —
+    // the depth map's lowest upward-facing sample cluster, else the lowest
+    // horizontal plane in the ARKit list.
+    std::string floor_json() const;
 
     // Event lines queued for `subscribe` streams ("event ..." payloads).
     std::vector<std::string> drain_events();

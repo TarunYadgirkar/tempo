@@ -67,6 +67,21 @@ constexpr float DEPTH_CAST_VERTICAL_NY = 0.3f;
 bool depth_cast_ray(const depth_cast_input &in, const float origin[3],
                     const float dir[3], depth_cast_result &out);
 
+// Height of the lowest upward-facing surface the depth map can see, in scene
+// metres. Samples are binned by height and only bins holding a real patch of
+// surface count, so a single stray reading below the floor cannot define it.
+//
+// False when the map holds no such surface — pointed at a wall, or every
+// upward-facing patch is too small to trust.
+bool depth_floor_height(const depth_cast_input &in, float &out_y);
+
+// Bin width the floor search groups sample heights into.
+constexpr float DEPTH_FLOOR_BIN_M = 0.02f;
+// A bin must hold at least this many samples, and this share of every
+// upward-facing sample, before it counts as a surface rather than noise.
+constexpr int DEPTH_FLOOR_MIN_SAMPLES = 20;
+constexpr float DEPTH_FLOOR_MIN_SHARE = 0.02f;
+
 // "horizontal" | "vertical" | "slanted" for a unit normal.
 const char *surface_kind(const float normal[3]);
 

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <vector>
 
 #include "core/vec_math.h"
 
@@ -240,6 +241,66 @@ bool depth_cast_ray(const depth_cast_input &in, const float origin[3],
             out.normal[i] = -d0[i];
     }
     return true;
+}
+
+bool depth_floor_height(const depth_cast_input &in, float &out_y) {
+    cam_basis b;
+    if (!make_basis(in, b))
+        return false;
+
+    // Every fourth pixel: a floor is thousands of samples wide, and the full
+    // map costs four normals per pixel for no extra certainty.
+    constexpr int STRIDE = 4;
+    // Bins are indexed off this so a floor below the scene origin (the usual
+    // case, since the origin sits at head height) still lands on a
+    // non-negative index.
+    constexpr float BIN_BASE_Y = -10.0f;
+    constexpr int BIN_COUNT =
+        (int)(20.0f / DEPTH_FLOOR_BIN_M);  // ±10 m about the origin
+
+    std::vector<int> counts((size_t)BIN_COUNT, 0);
+    std::vector<double> sums((size_t)BIN_COUNT, 0.0);
+    int total_up = 0;
+    const float toward_up[3] = {0.0f, 1.0f, 0.0f};
+
+    for (int y = NORMAL_STEP_PX; y + NORMAL_STEP_PX < in.height; y += STRIDE) {
+        for (int x = NORMAL_STEP_PX; x + NORMAL_STEP_PX < in.width;
+             x += STRIDE) {
+            float u = (float)x + 0.5f, v = (float)y + 0.5f, d;
+            if (!sample(in, u, v, d))
+                continue;
+            float n[3];
+            // Oriented toward world up rather than toward the camera: the
+            // question is which patches face the ceiling, not which face us.
+            if (!estimate_normal(in, b, u, v, d, toward_up, n))
+                continue;
+            if (n[1] <= DEPTH_CAST_HORIZONTAL_NY)
+                continue;
+            float p[3];
+            unproject(in, b, u, v, d, p);
+            if (!std::isfinite(p[1]))
+                continue;
+            int bin = (int)std::floor((p[1] - BIN_BASE_Y) / DEPTH_FLOOR_BIN_M);
+            if (bin < 0 || bin >= BIN_COUNT)
+                continue;
+            counts[(size_t)bin]++;
+            sums[(size_t)bin] += (double)p[1];
+            total_up++;
+        }
+    }
+    if (total_up < DEPTH_FLOOR_MIN_SAMPLES)
+        return false;
+
+    int need = (int)((float)total_up * DEPTH_FLOOR_MIN_SHARE);
+    if (need < DEPTH_FLOOR_MIN_SAMPLES)
+        need = DEPTH_FLOOR_MIN_SAMPLES;
+    for (int i = 0; i < BIN_COUNT; i++) {
+        if (counts[(size_t)i] < need)
+            continue;
+        out_y = (float)(sums[(size_t)i] / (double)counts[(size_t)i]);
+        return true;
+    }
+    return false;
 }
 
 const char *surface_kind(const float normal[3]) {

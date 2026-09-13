@@ -18,7 +18,9 @@ The wearer talks to you. Answer by taking spatial actions with the tools, then c
 short reply. Prefer putting information into the room (a note near the relevant object, an app panel
 where they are looking) over just talking. Use the image to understand what objects are around and
 what the wearer is pointing at or looking at. Keep notes short. Never invent panel handles; only use
-handles listed in the scene. If the request needs no action, just call `say`."""
+handles listed in the scene. The scene also lists remembered_places: named spots the wearer saved earlier,
+with their direction from where the wearer stands now; use recall_place when they ask where something is
+and remember_place when they tell you where something lives. If the request needs no action, just call `say`."""
 
 
 class Brain:

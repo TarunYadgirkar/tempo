@@ -22,3 +22,9 @@ credentials*.json
 *.mov
 outputs/
 data/raw/
+
+# model weights
+*.pt
+*.task
+*.onnx
+models/

@@ -71,6 +71,29 @@ float panel_height_m(const panel &p) {
     return p.width_m * (float)p.height_px / (float)p.width_px;
 }
 
+// Panel placement matrix from a full orientation: rows are the panel's own
+// basis (right / up / front) in the scene frame, translation last — the same
+// row-major, row-vector storage plane_to_matrix writes, so every consumer
+// (panel_hit_point, the renderer, window_json's quat) reads it unchanged.
+// The panel's +Z is its face, which is why identity faces +Z.
+void matrix_from_quat_pos(const float q[4], const float pos[3],
+                          float out[16]) {
+    const float basis[3][3] = {
+        {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+    for (int row = 0; row < 3; row++) {
+        float v[3];
+        quat_rotate_vec(q, basis[row], v);
+        out[row * 4 + 0] = v[0];
+        out[row * 4 + 1] = v[1];
+        out[row * 4 + 2] = v[2];
+        out[row * 4 + 3] = 0.0f;
+    }
+    out[12] = pos[0];
+    out[13] = pos[1];
+    out[14] = pos[2];
+    out[15] = 1.0f;
+}
+
 // Where a pinch lands on a panel's quad, in surface pixels (origin top-left,
 // Y down — the frame capture.mm's click injection and click_panel both take).
 //
@@ -487,6 +510,10 @@ void scene::refresh_anchor_transforms() {
                 p->has_anchor = true;
                 p->reanchor_pending = false;
             }
+        }
+        if (!p->has_anchor && p->has_pose_quat) {
+            matrix_from_quat_pos(p->pose_quat, p->pos, p->m);
+            continue;
         }
         if (!p->has_anchor) {
             // Yaw about +Y (facing the head at spawn/gather; identity when
@@ -1097,6 +1124,42 @@ bool scene::move_panel(uint64_t handle, const float vec[3], bool relative) {
     return true;
 }
 
+bool scene::pose_panel(uint64_t handle, const float pos[3],
+                       const float quat[4]) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    panel *p = find_panel(handle);
+    if (!p)
+        return false;
+    if (!v3finite(pos))
+        return false;
+    float q[4] = {quat[0], quat[1], quat[2], quat[3]};
+    float len = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] +
+                          q[3] * q[3]);
+    if (!(len > 1e-6f) || !std::isfinite(len))
+        return false;
+    for (int i = 0; i < 4; i++)
+        q[i] /= len;
+
+    v3copy(pos, p->pos);
+    v3copy(pos, p->target_pos);
+    for (int i = 0; i < 4; i++)
+        p->pose_quat[i] = q[i];
+    p->has_pose_quat = true;
+    // An explicit pose says where this panel goes, so it stops following a
+    // plane and stops waiting to re-snap to one.
+    p->has_anchor = false;
+    p->reanchor_pending = false;
+    // Keep yaw in step with the heading part of the new orientation, so a
+    // later gather or layout load starts from something sane.
+    const float fwd_local[3] = {0.0f, 0.0f, 1.0f};
+    float fwd[3];
+    quat_rotate_vec(q, fwd_local, fwd);
+    if (std::fabs(fwd[0]) > 1e-6f || std::fabs(fwd[2]) > 1e-6f)
+        p->yaw = std::atan2(fwd[0], fwd[2]);
+    matrix_from_quat_pos(q, p->pos, p->m);
+    return true;
+}
+
 int scene::anchor_panel(uint64_t handle, int mode, const uint8_t uuid[16],
                         uint8_t out_uuid[16]) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1289,6 +1352,7 @@ int scene::gather_panels_impl() {
                             (int)loose.size(), planes_, n_planes_, tune,
                             loose[i]->target_pos, &loose[i]->yaw);
         v3copy(loose[i]->target_pos, loose[i]->pos);
+        loose[i]->has_pose_quat = false;  // gather re-derives a facing yaw
     }
     char line[64];
     std::snprintf(line, sizeof(line), "event gather-panels count=%zu",
@@ -1659,9 +1723,27 @@ std::string scene::head_pose_json() const {
         quat_mul(env_.world_origin_rot_inv, last_pose_.rot, scene_rot);
         s += ",\"scene_pos\":" + vec_json(env_.head_pos, 3);
         s += ",\"scene_rot\":" + vec_json(scene_rot, 4);
+        // Camera roll about its own forward axis, measured against gravity:
+        // 0 with the phone level (landscape-native, the sensor's own
+        // orientation), +/-90 held portrait, 180 upside-down. Same ux/uy
+        // projection the renderer's orientation buckets snap
+        // (depth_math.h orientation_bucket_from_gravity), reported unsnapped.
+        const float rx[3] = {1.0f, 0.0f, 0.0f};
+        const float ry[3] = {0.0f, 1.0f, 0.0f};
+        float cam_right[3], cam_up[3];
+        quat_rotate_vec(last_pose_.rot, rx, cam_right);
+        quat_rotate_vec(last_pose_.rot, ry, cam_up);
+        float ux = cam_right[1], uy = cam_up[1];
+        // Looking near-straight up or down leaves gravity almost parallel to
+        // the optical axis, where roll is genuinely undefined rather than 0.
+        if (ux * ux + uy * uy >= 0.05f * 0.05f)
+            s += ",\"roll_deg\":" +
+                 fnum((double)(std::atan2(ux, uy) * 57.29577951308232f));
+        else
+            s += ",\"roll_deg\":null";
         s += ",\"quality\":" + fnum((double)last_pose_.tracking_quality);
     } else {
-        s += "\"tracking\":false";
+        s += "\"tracking\":false,\"roll_deg\":null";
     }
     s += "}";
     return s;
@@ -1767,6 +1849,45 @@ std::string scene::cast_json(const float *origin_in, const float *dir_in) const 
     return NONE;
 }
 
+std::string scene::floor_json() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (latest_depth_.have_pose && latest_depth_.have_intrinsics &&
+        !latest_depth_.depth.empty()) {
+        depth_cast_input in;
+        in.depth = latest_depth_.depth.data();
+        in.width = (int)latest_depth_.width;
+        in.height = (int)latest_depth_.height;
+        in.intr = latest_depth_.intr;
+        v3copy(latest_depth_.cam_pos, in.cam_pos);
+        for (int i = 0; i < 4; i++)
+            in.cam_quat[i] = latest_depth_.cam_quat[i];
+        float y;
+        if (depth_floor_height(in, y))
+            return "{\"height\":" + fnum((double)y) +
+                   ",\"source\":\"depth\"}";
+    }
+
+    bool have = false;
+    float lowest = 0.0f;
+    for (int i = 0; i < n_planes_; i++) {
+        if (planes_[i].is_removed)
+            continue;
+        float center[3], normal[3];
+        plane_to_scene_frame(env_, planes_[i], center, normal);
+        if (std::fabs(normal[1]) <= DEPTH_CAST_HORIZONTAL_NY)
+            continue;
+        if (!have || center[1] < lowest) {
+            lowest = center[1];
+            have = true;
+        }
+    }
+    if (have)
+        return "{\"height\":" + fnum((double)lowest) +
+               ",\"source\":\"plane\"}";
+    return "{\"height\":null,\"source\":\"none\"}";
+}
+
 // ------------------------------------------------------------------
 // layouts
 // ------------------------------------------------------------------
@@ -1805,6 +1926,9 @@ bool scene::apply_layout_pose(uint64_t handle, const layout_panel &saved) {
     v3copy(saved.pos, p->pos);
     v3copy(saved.pos, p->target_pos);
     p->yaw = saved.yaw;
+    // The layout file stores a yaw, not a full orientation, so a restored
+    // panel is a yawed panel again.
+    p->has_pose_quat = false;
     if (saved.width_m > 0.0f)
         p->width_m = saved.width_m;
     // A captured panel's pixel size belongs to the live window, not the file.

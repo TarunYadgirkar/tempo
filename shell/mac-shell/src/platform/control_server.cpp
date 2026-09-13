@@ -3,6 +3,7 @@
 #include "platform/control_server.h"
 
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -634,6 +635,10 @@ void control_server::on_line(conn &c, const char *line) {
         queue_ok_str(scene_.cast_json(nullptr, nullptr));
         return;
     }
+    if (is_bare_verb("floor")) {
+        queue_ok_str(scene_.floor_json());
+        return;
+    }
     if (is_bare_verb("stats")) {
         if (stats_)
             queue_ok_str(stats_());
@@ -668,6 +673,28 @@ void control_server::on_line(conn &c, const char *line) {
             return;
         }
         queue_ok_str(scene_.cast_json(o, d));
+        return;
+    }
+    if (sub_verb("pose", arg)) {
+        unsigned long long handle = 0;
+        float pos[3], quat[4];
+        char tail;
+        if (std::sscanf(arg.c_str(), "%llu %f %f %f %f %f %f %f %c", &handle,
+                        &pos[0], &pos[1], &pos[2], &quat[0], &quat[1],
+                        &quat[2], &quat[3], &tail) != 8) {
+            queue_err("parse_error", line);
+            return;
+        }
+        float len2 = quat[0] * quat[0] + quat[1] * quat[1] +
+                     quat[2] * quat[2] + quat[3] * quat[3];
+        if (!(len2 > 1e-8f) || !std::isfinite(len2)) {
+            queue_err("bad_quat", "orientation must be a non-zero xyzw quaternion");
+            return;
+        }
+        if (!scene_.pose_panel((uint64_t)handle, pos, quat))
+            queue_err("no_such_window", nullptr);
+        else
+            queue_ok();
         return;
     }
     if (sub_verb("depth-occlusion", arg)) {

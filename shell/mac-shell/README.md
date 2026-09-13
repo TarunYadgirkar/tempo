@@ -93,7 +93,9 @@ UI states render to PNGs via `scripts/mac-ui-screenshots.sh`.
 extensions: `launch-app <target>`, `permissions`, `stats`, `gather-panels`,
 `keyboard show|hide|status`, `launcher show|hide|select <n>|commit|status`,
 `note <json>` / `note-update <handle> <json>`, `aim`,
-`layout save|load|list <name>`, `depth-occlusion on|off|soft|status`, `hands overlay on|off|status` (the
+`layout save|load|list <name>`, `cast [<ox> <oy> <oz> <dx> <dy> <dz>]`,
+`floor`, `pose <handle> <x> <y> <z> <qx> <qy> <qz> <qw>`,
+`depth-occlusion on|off|soft|status`, `hands overlay on|off|status` (the
 21-joint skeleton with thin translucent bones and smaller joints. Cyan/yellow
 identify stream slots, not guaranteed handedness. Fingertips use rings with
 a small center in both modes; invalid points are hidden, low confidence fades,
