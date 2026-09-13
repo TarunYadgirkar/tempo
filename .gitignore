@@ -33,3 +33,6 @@ models/
 *.onnx
 .cache/
 agent/eval/fixtures/*.depth
+
+# face model weights (copied from facelock or downloaded on first run)
+agent/models/

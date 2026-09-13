@@ -109,6 +109,28 @@ def cmd_objects(args: argparse.Namespace) -> None:
             return
 
 
+def cmd_people(args: argparse.Namespace) -> None:
+    from . import people as pp
+
+    if args.action == "list":
+        store = pp.People()
+        for p in store.people.values():
+            said = p.last_said() or ""
+            print(f"{p.id}  {p.label:<18} faces={len(p.faces)} voices={len(p.voices)}{'  (you)' if p.is_owner else ''}  {said[:60]}")
+        return
+    if args.action == "forget":
+        print("forgot" if pp.People().forget(args.name) else "no such person", args.name)
+        return
+    if args.action == "me":
+        p = pp.enroll_owner(args.name, log=print)
+        print(f"you are {p.name} ({len(p.voices)} voiceprints)")
+        return
+    if not args.frames:
+        raise SystemExit("people: --frames DIR is required to watch the room")
+    pp.PeopleDaemon(args.frames, Shell(), mic=not args.no_mic, log=print).run(once=args.once)
+
+
+
 def cmd_eval(args: argparse.Namespace) -> None:
     from .eval import run, summarize
 
@@ -146,6 +168,13 @@ def main() -> None:
     o.add_argument("--prompts", help="comma separated vocabulary (default: common room objects)")
     o.add_argument("--conf", type=float, default=0.25)
     o.set_defaults(fn=cmd_objects)
+    pe = sub.add_parser("people", help="faces + voices in the room, with a bubble beside each head")
+    pe.add_argument("action", nargs="?", default="watch", choices=["watch", "list", "forget", "me"])
+    pe.add_argument("name", nargs="?", help="for forget/me")
+    pe.add_argument("--frames", help="frame export directory written by the shell")
+    pe.add_argument("--no-mic", action="store_true", help="faces only, no listening")
+    pe.add_argument("--once", action="store_true")
+    pe.set_defaults(fn=cmd_people)
     e = sub.add_parser("eval", help="run the fixed request set")
     e.add_argument("conditions", nargs="*", default=["geometry", "pixels"])
     e.add_argument("--limit", type=int)
