@@ -85,7 +85,7 @@ Without a phone: `SPATULA_MAC_HEADLESS=1 shell/build/mac-shell/mac-shell --repla
 
 | # | When (PT) | State | What changed | Where feedback helps |
 |---|---|---|---|---|
-| 1 | Sat Sep 12, 7 PM | Live end to end: spoken or typed request → Gemini → note or app panel placed in the room, 3 to 4 s per request. First eval run below. | Compositor base ported and building (27 tests). New this weekend: the agent, note panels, hand aim ray, layout save/load, gaze-ray surface placement, the 20-request eval in two conditions. | Is surface accuracy the right primary metric, or should we score against a human-placed target? |
+| 1 | Sat Sep 12, midnight | Live end to end: spoken or typed request → Gemini → note or app panel placed on the real surface, 3 to 4 s per request. Objects, remembered places, layouts, pinch-and-talk, Mac-side hand tracking all running on the rig. Two eval runs below. | Compositor base ported (31 shell tests). New today: the agent and its tools, note panels, depth ray-cast + full pose placement, floor and roll, OWL-ViT object map with LiDAR depth, spatial memory, layouts, local Whisper pinch-and-talk, RTMPose hands fused with LiDAR (77 tests), the placement eval, the hand-tracking eval. | Hand tracking: the Mac path matches the phone on detection but not yet on jitter; is the LiDAR-anchored shape model the right next step, or should we push frames to a cloud GPU running a mesh model (WiLoR) and eat the round trip? |
 
 ### Checkpoint 1 result, and why the geometry condition lost
 
