@@ -1,0 +1,281 @@
+[
+ {
+  "id": 1,
+  "condition": "geometry",
+  "text": "put a note on the desk that says buy milk",
+  "expect": "table",
+  "landed_kind": "wall",
+  "surface_error_m": 0.369,
+  "correct_surface": false,
+  "latency_s": 3.49,
+  "actions": [
+   "note #2 'Buy Milk' -> on_table",
+   "say \"I've placed a note on your desk to buy milk.\""
+  ]
+ },
+ {
+  "id": 2,
+  "condition": "geometry",
+  "text": "pin a reminder to the wall in front of me: call mom",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.05,
+  "correct_surface": true,
+  "latency_s": 5.63,
+  "actions": [
+   "note #4 'Call Mom' -> on_wall",
+   "say \"I've pinned a reminder to call your mom on the wall in front of you.\""
+  ]
+ },
+ {
+  "id": 3,
+  "condition": "geometry",
+  "text": "open safari on the wall",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.29,
+  "correct_surface": true,
+  "latency_s": 2.72,
+  "actions": [
+   "app Safari #5 -> on_wall",
+   "say 'Opened Safari on the wall.'"
+  ]
+ },
+ {
+  "id": 4,
+  "condition": "geometry",
+  "text": "put a note on the table with today's three tasks",
+  "expect": "table",
+  "landed_kind": "wall",
+  "surface_error_m": 0.031,
+  "correct_surface": false,
+  "latency_s": 4.02,
+  "actions": [
+   "note #6 \"Today's Tasks\" -> on_table",
+   "say \"I've placed a note with today's three tasks on the table.\""
+  ]
+ },
+ {
+  "id": 5,
+  "condition": "geometry",
+  "text": "stick a label on the wall that says charging station",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.05,
+  "correct_surface": true,
+  "latency_s": 6.42,
+  "actions": [
+   "note #7 'Charging Station' -> on_wall",
+   "say \"I've placed a Charging Station label on the wall for you.\""
+  ]
+ },
+ {
+  "id": 6,
+  "condition": "geometry",
+  "text": "open the terminal on my desk",
+  "expect": "table",
+  "landed_kind": "wall",
+  "surface_error_m": 0.368,
+  "correct_surface": false,
+  "latency_s": 4.13,
+  "actions": [
+   "app Terminal #8 -> on_table",
+   "say \"I've opened Terminal on your desk.\""
+  ]
+ },
+ {
+  "id": 7,
+  "condition": "geometry",
+  "text": "leave a note where I'm looking that says water the plant",
+  "expect": "gaze",
+  "landed_kind": "wall",
+  "surface_error_m": 0.1,
+  "correct_surface": true,
+  "latency_s": 3.59,
+  "actions": [
+   "note #9 'Water Plant' -> where_looking",
+   "say \"I've placed a note to water the plant right where you're looking.\""
+  ]
+ },
+ {
+  "id": 8,
+  "condition": "geometry",
+  "text": "put a shopping list on the wall",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.05,
+  "correct_surface": true,
+  "latency_s": 3.51,
+  "actions": [
+   "note #10 'Shopping List' -> on_wall",
+   "say \"I've placed a shopping list note on the wall for you.\""
+  ]
+ },
+ {
+  "id": 9,
+  "condition": "geometry",
+  "text": "open notes on the desk",
+  "expect": "table",
+  "landed_kind": "wall",
+  "surface_error_m": 0.364,
+  "correct_surface": false,
+  "latency_s": 4.52,
+  "actions": [
+   "app Notes #11 -> on_table",
+   "say 'I opened Notes on the surface in front of you.'"
+  ]
+ },
+ {
+  "id": 10,
+  "condition": "geometry",
+  "text": "put a note in front of me that says 7pm checkpoint",
+  "expect": "front",
+  "landed_kind": "wall",
+  "surface_error_m": 0.369,
+  "correct_surface": true,
+  "latency_s": 3.34,
+  "actions": [
+   "note #12 '7pm Checkpoint' -> in_front",
+   "say \"I've placed a note in front of you for your 7pm checkpoint.\""
+  ]
+ },
+ {
+  "id": 11,
+  "condition": "geometry",
+  "text": "put the wifi password on the wall: guest1234",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.05,
+  "correct_surface": true,
+  "latency_s": 4.24,
+  "actions": [
+   "note #13 'Wi-Fi Password' -> on_wall",
+   "say \"I've placed the Wi-Fi password note on the wall for you.\""
+  ]
+ },
+ {
+  "id": 12,
+  "condition": "geometry",
+  "text": "leave a note on the table that says return the library book",
+  "expect": "table",
+  "landed_kind": "wall",
+  "surface_error_m": 0.368,
+  "correct_surface": false,
+  "latency_s": 3.48,
+  "actions": [
+   "note #14 'Library Book' -> on_table",
+   "say \"I've placed a note on the table to remind you to return your library book.\""
+  ]
+ },
+ {
+  "id": 13,
+  "condition": "geometry",
+  "text": "open calendar where I'm looking",
+  "expect": "gaze",
+  "landed_kind": "wall",
+  "surface_error_m": 0.094,
+  "correct_surface": true,
+  "latency_s": 3.41,
+  "actions": [
+   "app Calendar #15 -> where_looking",
+   "say \"I've opened Calendar where you're looking.\""
+  ]
+ },
+ {
+  "id": 14,
+  "condition": "geometry",
+  "text": "put a note on the wall that says do not disturb",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.05,
+  "correct_surface": true,
+  "latency_s": 2.95,
+  "actions": [
+   "note #16 'Do Not Disturb' -> on_wall",
+   "say \"I've placed a Do Not Disturb note on the wall for you.\""
+  ]
+ },
+ {
+  "id": 15,
+  "condition": "geometry",
+  "text": "put a note on my desk: email the TA",
+  "expect": "table",
+  "landed_kind": "wall",
+  "surface_error_m": 0.366,
+  "correct_surface": false,
+  "latency_s": 4.45,
+  "actions": [
+   "note #17 'Email TA' -> on_table",
+   "say 'I placed a note to email the TA on your desk.'"
+  ]
+ },
+ {
+  "id": 16,
+  "condition": "geometry",
+  "text": "open messages to my left",
+  "expect": "front",
+  "landed_kind": "wall",
+  "surface_error_m": 0.868,
+  "correct_surface": true,
+  "latency_s": 2.85,
+  "actions": [
+   "app Messages #18 -> left",
+   "say \"I've opened Messages to your left.\""
+  ]
+ },
+ {
+  "id": 17,
+  "condition": "geometry",
+  "text": "put a note on the wall behind the monitor that says standup at 10",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.05,
+  "correct_surface": true,
+  "latency_s": 4.69,
+  "actions": [
+   "note #19 'Standup Meeting' -> on_wall",
+   "say \"I've placed a note on the wall reminding you about standup at 10.\""
+  ]
+ },
+ {
+  "id": 18,
+  "condition": "geometry",
+  "text": "leave a sticky note on the table that says keys are in the drawer",
+  "expect": "table",
+  "landed_kind": "wall",
+  "surface_error_m": 0.368,
+  "correct_surface": false,
+  "latency_s": 3.73,
+  "actions": [
+   "note #20 'Keys Location' -> on_table",
+   "say \"I've placed a note on the table letting you know your keys are in the drawer.\""
+  ]
+ },
+ {
+  "id": 19,
+  "condition": "geometry",
+  "text": "open safari where I'm looking",
+  "expect": "gaze",
+  "landed_kind": "wall",
+  "surface_error_m": 0.103,
+  "correct_surface": true,
+  "latency_s": 3.52,
+  "actions": [
+   "app Safari #21 -> where_looking",
+   "say \"I've opened Safari right where you're looking.\""
+  ]
+ },
+ {
+  "id": 20,
+  "condition": "geometry",
+  "text": "put a note on the wall that says rent due friday",
+  "expect": "wall",
+  "landed_kind": "wall",
+  "surface_error_m": 0.297,
+  "correct_surface": true,
+  "latency_s": 3.05,
+  "actions": [
+   "note #22 'Rent Due' -> on_wall"
+  ]
+ }
+]

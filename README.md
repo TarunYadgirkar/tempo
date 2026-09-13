@@ -80,4 +80,13 @@ Without a phone: `SPATULA_MAC_HEADLESS=1 shell/build/mac-shell/mac-shell --repla
 
 Twenty requests each, one room, same model and prompt. The geometry condition lost, and the identical 0.55 m error on every "desk" request says why: the LiDAR *plane list* the compositor exposes is sparse and stale. At run time it held eight vertical planes and a ceiling; the bed the wearer was looking at had been classified vertical and the desk was absent, so the gaze ray hit no horizontal surface and the executor fell back to a fixed offset ahead of the head. The image-only model, guessing "about 0.7 m ahead and 0.3 m down", landed closer.
 
-So the baseline is doing its job: it shows that geometry only helps when the geometry is actually there. Next 12 hours: replace the plane-list ray cast with a ray march through the dense LiDAR depth map (the compositor already has it for occlusion), which gives a hit on any surface in view regardless of ARKit's plane detection, then rerun both conditions.
+So the baseline is doing its job: it shows that geometry only helps when the geometry is actually there.
+
+**Second run, same evening, after replacing the plane list with a ray march through the dense LiDAR depth map** (`cast` verb, plus a full `pose` so panels take the surface's orientation):
+
+| Condition | Surface accuracy | Median off-surface error | Wall requests only, median error | Mean latency |
+|---|---|---|---|---|
+| Image + depth geometry | 0.65 | 0.29 m | **0.05 m** (the 5 cm lift, i.e. on the wall) | 3.9 s |
+| Image only | 0.65 | 0.39 m | 0.32 m | 4.8 s |
+
+Every wall request now lands on the wall to within the deliberate 5 cm standoff. The remaining misses are all "desk" requests made while no horizontal surface was in the camera's view (the wearer was facing a wall and a bed), so both conditions put the note on the nearest wall; the scorer counts that as wrong for both. That's the honest limit of the setup, not of the method: the agent can only place on what the sensor sees. Next: the object detector so "next to the lamp" resolves, and a run with the desk in view.
