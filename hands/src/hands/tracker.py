@@ -60,6 +60,10 @@ DEFAULT_DEPTH_MODE = "rigid"
 # middle of a pinch, which at 12 Hz is 80 ms of the gesture engine being told
 # the hand left the room. Two frames, then the truth.
 DEFAULT_HOLD_FRAMES = 2
+# A head-mounted camera sees the wearer's own hand within arm's reach.
+DEFAULT_MAX_RANGE_M = 1.0
+DEFAULT_MIN_CONFIDENCE = 0.5
+
 
 
 @dataclass
@@ -98,6 +102,8 @@ class HandTracker:
         hold_frames: int = DEFAULT_HOLD_FRAMES,
         fallback_depth_m: float = 0.0,
         dorsal_view: bool = True,
+        max_range_m: float = DEFAULT_MAX_RANGE_M,
+        min_confidence: float = DEFAULT_MIN_CONFIDENCE,
         **backend_kwargs,
     ):
         if depth_mode not in DEPTH_MODES:
@@ -108,6 +114,8 @@ class HandTracker:
         self._window = depth_window
         self._fallback_depth = fallback_depth_m
         self._dorsal = dorsal_view
+        self._max_range = max_range_m
+        self._min_confidence = min_confidence
         self._hold_frames = max(0, hold_frames)
         self._filters: dict[str, JointFilter] = {}
         self._filter_params = (min_cutoff, beta)
@@ -205,6 +213,8 @@ class HandTracker:
         if built is None:
             return None
         depths, depth_valid, range_m, range_samples = built
+        if not self._plausible(detection, range_m):
+            return None
 
         chirality = self._chirality(detection, landmarks)
         if chirality is None:
@@ -246,6 +256,20 @@ class HandTracker:
         )
         self._held[chirality] = (hand, 0)
         return hand
+
+    def _plausible(self, detection: Detection, range_m: float) -> bool:
+        """Is this a wearer's hand, or something hand-shaped across the room?
+
+        The camera is on the head, so a hand the wearer can gesture with is
+        within arm's reach; anything further is another person or a false
+        positive. Gated on the RAW range, before smoothing, so a phantom never
+        primes the range filter that the real hand then inherits.
+        """
+        if detection.confidence < self._min_confidence:
+            return False
+        if self._max_range > 0.0 and range_m > self._max_range:
+            return False
+        return True
 
     def _measure_range(self, frame: ExportedFrame, detection: Detection):
         """The one LiDAR question the rigid path asks: how far is the hand?
@@ -402,6 +426,8 @@ def tracker_from_args(args) -> HandTracker:
         hold_frames=args.hold_frames,
         fallback_depth_m=args.fallback_depth_m,
         dorsal_view=args.dorsal_view,
+        max_range_m=args.max_range_m,
+        min_confidence=args.min_confidence,
     )
     if args.backend == "mediapipe":
         return HandTracker(

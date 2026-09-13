@@ -9,7 +9,13 @@ from .backends import BACKENDS, DEFAULT_BACKEND, DEFAULT_MODEL
 from .check import run_check
 from .evaluate import DEFAULT_WINDOW_S, run_eval
 from .track import run_track
-from .tracker import DEFAULT_DEPTH_MODE, DEFAULT_HOLD_FRAMES, DEPTH_MODES
+from .tracker import (
+    DEFAULT_DEPTH_MODE,
+    DEFAULT_HOLD_FRAMES,
+    DEFAULT_MAX_RANGE_M,
+    DEFAULT_MIN_CONFIDENCE,
+    DEPTH_MODES,
+)
 
 
 def _common(p: argparse.ArgumentParser) -> None:
@@ -165,6 +171,25 @@ def _common(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _gates(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--max-range-m",
+        type=float,
+        default=DEFAULT_MAX_RANGE_M,
+        help=(
+            "drop a detected hand further than this from the camera, before "
+            "it touches the range filter. The wearer's hand is within arm's "
+            "reach; further is someone else or a false positive. 0 disables"
+        ),
+    )
+    p.add_argument(
+        "--min-confidence",
+        type=float,
+        default=DEFAULT_MIN_CONFIDENCE,
+        help="drop a detected hand whose model confidence is below this",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hands",
@@ -179,6 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
         "track", help="run the tracker and feed the shell (the live path)"
     )
     _common(track)
+    _gates(track)
     track.add_argument(
         "--enable-export",
         action="store_true",
@@ -196,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="record the phone's hands and the Mac's side by side and compare",
     )
     _common(ev)
+    _gates(ev)
     ev.add_argument("--seconds", type=float, default=60.0)
     ev.add_argument(
         "--window-s",
@@ -237,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _common(check)
+    _gates(check)
     return parser
 
 

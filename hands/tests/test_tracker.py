@@ -135,3 +135,21 @@ def test_the_hold_can_be_turned_off(monkeypatch):
 def test_an_unknown_depth_mode_is_refused_at_construction(monkeypatch):
     with pytest.raises(ValueError, match="depth mode"):
         _tracker([], monkeypatch, depth_mode="whatever")
+
+
+def test_a_hand_beyond_arms_reach_is_dropped_before_it_primes_the_range_filter(
+    monkeypatch,
+):
+    # A hand-shaped thing across the room at 1.5 m, then the real hand at 0.5 m.
+    tr = _tracker([[_detection()], [_detection()]], monkeypatch, max_range_m=1.0)
+    assert tr.track(_frame(1.5, t_ns=0)).hands == []
+    hands = tr.track(_frame(RANGE, seq=1, t_ns=int(0.05e9))).hands
+    assert len(hands) == 1
+    # Had the phantom primed the filter, the real hand would start far too deep.
+    assert hands[0].range_m == pytest.approx(RANGE, abs=0.02)
+
+
+def test_a_low_confidence_hand_is_dropped(monkeypatch):
+    weak = Detection(**{**_detection().__dict__, "confidence": 0.2})
+    tr = _tracker([[weak]], monkeypatch, min_confidence=0.5)
+    assert tr.track(_frame(RANGE)).hands == []
