@@ -331,14 +331,22 @@ class Bubbles:
     def show(self, person: Person, pos: spatial.Vec3, head_pos: spatial.Vec3, now: float) -> None:
         text = bubble_text(person)
         b = self.by_person.get(person.id)
+        if b is not None and text != b.text:
+            # Update in place. If the shell already closed this window (the face
+            # left long enough for the compositor to retire it, or a stale handle
+            # from a previous run), drop it and create a fresh one instead of
+            # letting the no_such_window error kill the whole daemon.
+            try:
+                self.shell.send(f"note-update {b.handle} " + json.dumps({"title": text[0], "body": text[1], "accent": person.name is None}))
+                b.text = text
+            except ShellError:
+                self.by_person.pop(person.id, None)
+                b = None
         if b is None:
             handle = self.shell.note(text[0], text[1], accent=person.name is None)
             b = Bubble(handle, (math.inf, 0, 0), text, now)
             self.by_person[person.id] = b
             self.log(f"people: bubble {handle} for {person.label}")
-        elif text != b.text:
-            self.shell.send(f"note-update {b.handle} " + json.dumps({"title": text[0], "body": text[1], "accent": person.name is None}))
-            b.text = text
         b.last_seen = now
         moved = math.dist(pos, b.pos) if math.isfinite(b.pos[0]) else math.inf
         if moved > BUBBLE_MOVE_M and now - b.last_posed >= BUBBLE_MIN_REPOSE_S:

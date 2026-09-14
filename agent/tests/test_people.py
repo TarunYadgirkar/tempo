@@ -160,3 +160,53 @@ def test_spatial_track_reuses_nearby_face(tmp_path):
     assert daemon._track((0.5, 0.0, -1.0), 0.5) is None
     # After TRACK_WINDOW_S the track expires.
     assert daemon._track((0.05, 0.0, -1.0), pp.TRACK_WINDOW_S + 1.0) is None
+
+
+class _FakeShell:
+    """Minimal Shell stand-in for bubble lifecycle tests."""
+
+    def __init__(self, update_raises=False):
+        self.update_raises = update_raises
+        self.note_calls = 0
+        self.update_calls = 0
+        self.pose_calls = 0
+        self.close_calls = 0
+        self._next_handle = 100
+
+    def note(self, title, body, accent=False):
+        self.note_calls += 1
+        self._next_handle += 1
+        return self._next_handle
+
+    def send(self, line):
+        self.update_calls += 1
+        if self.update_raises:
+            raise pp.ShellError(f"{line!r} -> err no_such_window")
+        from .shell import Reply  # noqa: F401  (kept for parity with Shell)
+        return type("R", (), {"ok": True})()
+
+    def pose(self, handle, pos, quat):
+        self.pose_calls += 1
+
+    def close_window(self, handle):
+        self.close_calls += 1
+
+
+def test_bubble_recreates_when_shell_closed_its_window():
+    """A note-update on a window the compositor already retired (no_such_window)
+    must not crash the daemon: drop the stale handle and create a fresh bubble."""
+    shell = _FakeShell(update_raises=True)
+    bubbles = pp.Bubbles(shell, log=lambda *a: None)
+    person = pp.Person(id="p1")
+    person.name = "Alice"
+    # First show creates the bubble.
+    bubbles.show(person, (0.0, 0.0, -1.0), (0.0, 0.0, 0.0), 0.0)
+    assert shell.note_calls == 1
+    first_handle = bubbles.by_person[person.id].handle
+    # A new utterance changes the bubble text -> note-update is attempted, fails,
+    # and the bubble is recreated instead of raising.
+    person.say("now I have a new line", 1.0)
+    bubbles.show(person, (0.0, 0.0, -1.0), (0.0, 0.0, 0.0), 1.0)
+    assert shell.update_calls == 1
+    assert shell.note_calls == 2  # recreated
+    assert bubbles.by_person[person.id].handle != first_handle
