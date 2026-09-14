@@ -8,8 +8,10 @@
 //
 // Entries load from ~/.config/spatial-os/launcher.toml ([[entry]] blocks with
 // label/target); defaults are the internal test-card plus Safari, Terminal,
-// Finder via the launch-app path. Targets: "internal:<title>" spawns an
-// internal test-card panel, anything else is handed to the app launcher.
+// Finder, Notes via the launch-app path, and a "Close All" self-target that
+// runs close_all_panels (closing every panel without dismissing the
+// launcher). Targets: "internal:<title>" spawns an internal test-card panel,
+// "close-all" closes every panel, anything else is handed to the app launcher.
 //
 // Pure C++ — the renderer consumes snapshot() (a CPU-rendered HUD texture).
 // Not thread-safe on its own: the owning scene serialises all calls.

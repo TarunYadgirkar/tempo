@@ -627,6 +627,17 @@ void control_server::on_line(conn &c, const char *line) {
         queue(rbuf);
         return;
     }
+    // `close-all` (alias `reset`): close every open panel — note, captured
+    // window and internal test-card — in one shot. The launcher is not a
+    // panel and stays up, so this is safe to fire from the launcher's own
+    // commit. Replies `ok closed=<n>`; idempotent (0 when nothing is open).
+    if (is_bare_verb("close-all") || is_bare_verb("reset")) {
+        char rbuf[64];
+        std::snprintf(rbuf, sizeof(rbuf), "ok closed=%d",
+                      scene_.close_all_panels());
+        queue(rbuf);
+        return;
+    }
     if (is_bare_verb("aim")) {
         queue_ok_str(scene_.aim_json());
         return;

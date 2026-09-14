@@ -1,7 +1,35 @@
 # Hackathon changes inside shell/
 
-Three control-socket verbs on top of the wxrd wire layer. Replies keep the
+Control-socket verbs on top of the wxrd wire layer. Replies keep the
 line protocol's `ok ...` / `err <code> <detail>` shape.
+
+- **`close-all`** (alias **`reset`**) — close every open panel — note, captured
+  window and internal test-card — in one shot. Replies `ok closed=<n>`;
+  idempotent (`ok closed=0` when nothing is open). The launcher is NOT a panel
+  and stays up, so this is safe to fire from the launcher's own commit
+  (fist -> launcher -> pick "Close All" -> release does not yank the menu away
+  mid-gesture). Implemented as `scene::close_all_panels` (and a `_impl` body
+  reused by the launcher commit path, which already holds the scene mutex):
+  emits a `window-unmap` event per panel and clears focus/grab.
+  Files: `mac-shell/src/core/scene.{h,cpp}`,
+  `mac-shell/src/platform/control_server.cpp`.
+  Tests: `mac-shell/tests/test_scene.cpp` (`test_close_all_panels`),
+  `mac-shell/tests/test_hack_verbs_e2e.cpp` (`test_close_all`).
+
+- **launcher default entries** — the radial launcher's built-in entries (used
+  when no `~/.config/spatial-os/launcher.toml` is found) now list real
+  openable apps plus a self-target: Test Card, Safari, Terminal, Finder,
+  Notes, and "Close All". App entries use the `app:<name>` target that
+  `on_launcher_launch` hands to the `launch-app` handler (headless fallback
+  spawns an internal test-card panel named after the target); "Close All"
+  uses the `close-all` self-target, which runs `close_all_panels_impl`. Six
+  entries fill one radial page (`RM_ITEMS_PER_PAGE`). The earlier rig showed
+  only the hand-skeleton overlay because the running binary predated these
+  entries / the launcher surface; a shell restart loads them.
+  Files: `mac-shell/src/ui/launcher_menu.{h,cpp}`,
+  `mac-shell/src/core/scene.cpp` (`on_launcher_launch`).
+  Tests: `mac-shell/tests/test_launcher.cpp` (`test_default_entries`,
+  `test_scene_close_all_entry`).
 
 - **`note <json>`** — `{"title":str,"body":str,"accent":optional bool}` creates
   a `panel_kind::note` panel: 512x320, title over word-wrapped body (six lines,

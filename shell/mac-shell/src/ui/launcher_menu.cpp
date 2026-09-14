@@ -61,11 +61,20 @@ void json_escape(const std::string &in, std::string &out) {
 }  // namespace
 
 launcher_menu::launcher_menu() {
+    // Default radial-launcher entries. Real openable mac apps go through the
+    // `app:<name>` path (on_launcher_launch strips the prefix and hands the
+    // name to the `launch-app` handler / headless fallback). "Close All" is
+    // a self-target: on_launcher_launch runs close_all_panels_impl, closing
+    // every panel without dismissing the launcher mid-gesture. A
+    // ~/.config/spatial-os/launcher.toml ([[entry]] label/target blocks)
+    // overrides this list. Six entries fill one radial page (RM_ITEMS_PER_PAGE).
     entries_ = {
         {"Test Card", "internal:test-card"},
         {"Safari", "app:Safari"},
         {"Terminal", "app:Terminal"},
         {"Finder", "app:Finder"},
+        {"Notes", "app:Notes"},
+        {"Close All", "close-all"},
     };
     load_config(nullptr);
     rebuild_model();

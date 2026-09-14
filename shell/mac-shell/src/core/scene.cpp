@@ -1396,6 +1396,29 @@ bool scene::close_panel(uint64_t handle) {
     return true;
 }
 
+int scene::close_all_panels() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return close_all_panels_impl();
+}
+
+int scene::close_all_panels_impl() {
+    // mutex_ held. Close every panel (note, captured window, internal
+    // test-card). The launcher is not a panel and survives, so committing
+    // "Close All" from the radial menu never dismisses the menu mid-gesture.
+    if (panels_.empty())
+        return 0;
+    std::vector<uint64_t> handles;
+    handles.reserve(panels_.size());
+    for (const auto &p : panels_)
+        handles.push_back(p->handle);
+    for (uint64_t h : handles)
+        push_event(handle_event("window-unmap", h));
+    panels_.clear();
+    focused_ = 0;
+    grabbed_ = 0;
+    return (int)handles.size();
+}
+
 bool scene::resize_panel(uint64_t handle, int width, int height) {
     std::lock_guard<std::mutex> lock(mutex_);
     panel *p = find_panel(handle);
@@ -1624,6 +1647,12 @@ void scene::on_launcher_launch(const launcher_entry &entry) {
     // a fallback panel synchronously, which needs the lock).
     std::string line = "event launcher-launch label=" + entry.label;
     push_event(line);
+    if (entry.target == "close-all") {
+        // Close every panel without dismissing the launcher itself — the
+        // menu is not a panel, so it stays up through the commit.
+        close_all_panels_impl();
+        return;
+    }
     const std::string internal_prefix = "internal:";
     if (entry.target.rfind(internal_prefix, 0) == 0) {
         spawn_panel_impl("test-card",

@@ -1256,6 +1256,48 @@ static void test_head_pose_roll() {
     CHECK(std::isnan(roll_of(looking_down)));
 }
 
+// `close-all`: closes every open panel (note, captured, internal) in one
+// shot, returns the count, and leaves focus/grab clear. The launcher is not
+// a panel and is untouched. Idempotent.
+static void test_close_all_panels() {
+    scene s;
+    s.inject_pose(identity_pose());
+
+    uint64_t a = s.spawn_panel("test-card", "alpha");
+    uint64_t b = s.spawn_note_panel("Note A", "body a", false);
+    uint64_t c = s.spawn_panel("test-card", "gamma");
+    CHECK(a == 1 && b == 2 && c == 3);
+    CHECK(s.panel_count() == 3);
+    CHECK(s.focused_handle() == c);
+
+    int closed = s.close_all_panels();
+    CHECK(closed == 3);
+    CHECK(s.panel_count() == 0);
+    CHECK(s.focused_handle() == 0);
+
+    // Every panel emitted a window-unmap on the subscribe stream.
+    bool saw_unmap_1 = false, saw_unmap_2 = false, saw_unmap_3 = false;
+    for (const auto &ev : s.drain_events()) {
+        if (ev.find("window-unmap handle=1") != std::string::npos)
+            saw_unmap_1 = true;
+        if (ev.find("window-unmap handle=2") != std::string::npos)
+            saw_unmap_2 = true;
+        if (ev.find("window-unmap handle=3") != std::string::npos)
+            saw_unmap_3 = true;
+    }
+    CHECK(saw_unmap_1 && saw_unmap_2 && saw_unmap_3);
+
+    // Idempotent: nothing left to close.
+    CHECK(s.close_all_panels() == 0);
+    CHECK(s.panel_count() == 0);
+
+    // Re-open after a close-all and close again — handles keep counting.
+    uint64_t d = s.spawn_panel("test-card", "delta");
+    CHECK(d == 4);
+    CHECK(s.close_all_panels() == 1);
+    CHECK(s.panel_count() == 0);
+}
+
 int main() {
     test_ray_picks_nearest_rotated_surface();
     test_aim_ignores_unreliable_fingertips();
@@ -1283,6 +1325,7 @@ int main() {
     test_pose_panel();
     test_floor_from_planes();
     test_head_pose_roll();
+    test_close_all_panels();
 
     if (g_failures) {
         std::fprintf(stderr, "test_scene: %d FAILURES\n", g_failures);

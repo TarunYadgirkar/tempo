@@ -476,6 +476,109 @@ void test_snapshot() {
     std::printf("PASS test_snapshot\n");
 }
 
+// The built-in defaults (used when no launcher.toml is found) list real
+// openable apps plus a "Close All" self-target — not the hand-skeleton
+// overlay the user saw on the stale rig binary. Verified with an empty
+// XDG_CONFIG_HOME so the test is independent of the dev machine's ~/.config.
+void test_default_entries() {
+    char tmpl[] = "/tmp/spatula-launcher-defaults-XXXXXX";
+    const char *dir = mkdtemp(tmpl);
+    assert(dir);
+    const char *prev_xdg = getenv("XDG_CONFIG_HOME");
+    const char *prev_home = getenv("HOME");
+    setenv("XDG_CONFIG_HOME", dir, 1);
+    setenv("HOME", "/nonexistent-spatula-launcher-defaults", 1);
+
+    launcher_menu m;
+    CHECK(m.entries().size() == 6);
+    // Real openable apps + the close-all self-target + the internal test card.
+    std::string labels;
+    for (const auto &e : m.entries())
+        labels += e.label + "|";
+    CHECK(labels.find("Safari|") != std::string::npos);
+    CHECK(labels.find("Terminal|") != std::string::npos);
+    CHECK(labels.find("Finder|") != std::string::npos);
+    CHECK(labels.find("Notes|") != std::string::npos);
+    CHECK(labels.find("Close All|") != std::string::npos);
+    CHECK(labels.find("Test Card|") != std::string::npos);
+
+    // The "Close All" entry targets the close-all self-action.
+    bool found_close_all = false;
+    for (const auto &e : m.entries()) {
+        if (e.label == "Close All") {
+            CHECK(e.target == "close-all");
+            found_close_all = true;
+        }
+    }
+    CHECK(found_close_all);
+
+    // Selecting and committing the "Close All" wedge fires the launch
+    // callback with the close-all target (the scene wires that to
+    // close_all_panels).
+    std::string launched_target;
+    m.set_launch_callback(
+        [&](const launcher_entry &e) { launched_target = e.target; });
+    m.show();
+    // "Close All" is the 6th entry (index 5) on page 0.
+    CHECK(m.select(5));
+    CHECK(m.commit());
+    CHECK(launched_target == "close-all");
+
+    if (prev_xdg)
+        setenv("XDG_CONFIG_HOME", prev_xdg, 1);
+    else
+        unsetenv("XDG_CONFIG_HOME");
+    if (prev_home)
+        setenv("HOME", prev_home, 1);
+    else
+        unsetenv("HOME");
+    rmdir(dir);
+    std::printf("PASS test_default_entries\n");
+}
+
+// Scene-level: committing the launcher's "Close All" entry closes every open
+// panel without dismissing the launcher mid-gesture (the launcher is not a
+// panel). Uses an empty XDG_CONFIG_HOME so the built-in defaults apply.
+void test_scene_close_all_entry() {
+    char tmpl[] = "/tmp/spatula-launcher-closeall-XXXXXX";
+    const char *dir = mkdtemp(tmpl);
+    assert(dir);
+    const char *prev_xdg = getenv("XDG_CONFIG_HOME");
+    const char *prev_home = getenv("HOME");
+    setenv("XDG_CONFIG_HOME", dir, 1);
+    setenv("HOME", "/nonexistent-spatula-launcher-closeall", 1);
+
+    scene s;
+    s.inject_pose(identity_pose());
+    s.tick(DT);
+    s.spawn_panel("test-card", "alpha");
+    s.spawn_panel("test-card", "beta");
+    s.spawn_note_panel("Note", "body", false);
+    CHECK(s.panel_count() == 3);
+
+    s.launcher_show();
+    CHECK(s.launcher_visible());
+    std::string st = s.launcher_status_json();
+    CHECK(st.find("\"Close All\"") != std::string::npos);
+    // "Close All" is the 6th entry (index 5) on page 0.
+    CHECK(s.launcher_select(5));
+    CHECK(s.launcher_commit());
+    // The launcher hid on commit; every panel closed.
+    CHECK(!s.launcher_visible());
+    CHECK(s.panel_count() == 0);
+
+    if (prev_xdg)
+        setenv("XDG_CONFIG_HOME", prev_xdg, 1);
+    else
+        unsetenv("XDG_CONFIG_HOME");
+    if (prev_home)
+        setenv("HOME", prev_home, 1);
+    else
+        unsetenv("HOME");
+    rmdir(dir);
+    std::printf("PASS test_scene_close_all_entry\n");
+}
+
 }  // namespace
 
 int main() {
@@ -499,6 +602,8 @@ int main() {
     test_release_without_scrub_cancels();
     test_scene_launcher_cancel();
     test_snapshot();
+    test_default_entries();
+    test_scene_close_all_entry();
 
     if (g_failures) {
         std::fprintf(stderr, "test_launcher: %d FAILURES\n", g_failures);

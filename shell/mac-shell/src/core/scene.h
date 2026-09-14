@@ -174,6 +174,13 @@ class scene {
     // Re-place an existing panel in front of the head and focus it.
     bool recall_panel(uint64_t handle);
     bool close_panel(uint64_t handle);
+    // Close every open panel at once — note, captured-window and internal
+    // test-card. The launcher is NOT a panel and stays up, so a
+    // fist->launcher->pick "Close All"->release does not yank the menu away
+    // mid-gesture. Returns the number of panels closed. Idempotent (0 when
+    // nothing is open). Control verb `close-all` (alias `reset`); also the
+    // target of the launcher's "Close All" entry.
+    int close_all_panels();
     bool resize_panel(uint64_t handle, int width, int height);
     // Input routed to the focused panel's input log. false → no focus.
     bool type_text(const std::string &text);
@@ -418,6 +425,9 @@ class scene {
                            float *out_yaw) const;
     float depth_ahead_locked(const float origin[3], const float dir[3]) const;
     int gather_panels_impl();
+    // mutex_ held body of close_all_panels (the launcher commit path already
+    // holds the lock). Emits a window-unmap event per panel, clears focus/grab.
+    int close_all_panels_impl();
     bool scene_head_quat(float out_quat[4]) const;
     void on_key_emit(uint32_t keysym, const char *label, bool repeat);
     void on_launcher_launch(const launcher_entry &entry);

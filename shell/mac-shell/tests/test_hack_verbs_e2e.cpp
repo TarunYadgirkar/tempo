@@ -288,6 +288,46 @@ static void test_layouts(ctl_client &c) {
     CHECK_MSG(contains(lw, "\"handle\":6"), lw.c_str());
 }
 
+// `close-all` (alias `reset`): close every open panel in one shot. Replies
+// `ok closed=<n>` and leaves `list-windows` empty. Idempotent.
+static void test_close_all(ctl_client &c) {
+    // Close whatever test_layouts left open (two layout loads of 2 notes each
+    // = 4 panels, but count from list-windows so this stays correct if that
+    // test changes).
+    std::string lw = c.request("list-windows");
+    size_t wp = lw.find("\"windows\":[");
+    CHECK_MSG(wp != std::string::npos, lw.c_str());
+    int before = 0;
+    for (size_t at = wp; (at = lw.find("\"handle\":", at + 1)) != std::string::npos;)
+        before++;
+    CHECK_MSG(before > 0, "layouts should have left panels open");
+
+    std::string r = c.request("close-all");
+    CHECK_MSG(r.rfind("ok closed=", 0) == 0, r.c_str());
+    CHECK_MSG(r == "ok closed=" + std::to_string(before), r.c_str());
+    lw = c.request("list-windows");
+    CHECK_MSG(contains(lw, "\"windows\":[]"), lw.c_str());
+
+    // Idempotent: nothing left to close.
+    CHECK(c.request("close-all") == "ok closed=0");
+    // `reset` is an alias for `close-all`.
+    CHECK(c.request("reset") == "ok closed=0");
+
+    // Open fresh panels and close-all again.
+    CHECK(c.request(R"(note {"title":"X","body":"y"})").rfind("ok handle=", 0) == 0);
+    CHECK(c.request("launch terminal") == "ok");  // internal test-card panel
+    r = c.request("close-all");
+    CHECK_MSG(r == "ok closed=2", r.c_str());
+    CHECK_MSG(contains(c.request("list-windows"), "\"windows\":[]"),
+              "list empty after second close-all");
+
+    // `reset` closes too.
+    CHECK(c.request("launch finder") == "ok");
+    CHECK(c.request("reset") == "ok closed=1");
+    CHECK_MSG(contains(c.request("list-windows"), "\"windows\":[]"),
+              "list empty after reset");
+}
+
 int main() {
     std::string dir = "/tmp";
     if (const char *t = getenv("TMPDIR"); t && t[0])
@@ -338,6 +378,7 @@ int main() {
         test_notes(c);
         test_aim(c);
         test_layouts(c);
+        test_close_all(c);
         c.close_fd();
     }
 
