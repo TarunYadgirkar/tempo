@@ -4,38 +4,38 @@ East v. West 72 Hour Hackathon entry. Solo (Tarun Yadgirkar, UC Berkeley), Deep 
 
 ## Ongoing
 
-Updated: 2026-09-13T19:57:00-07:00 by claude session
+Updated: 2026-09-13T20:40:00-07:00 by claude session
 
-Done:
-- People layer (faces YuNet+ArcFace, voices mlx-whisper+ECAPA, siyi CRM), people in scene JSON, one-line Gemini summary per person bubble. (2441ea3, 6ea7356)
-- Hands calibrate code written + unit-tested; `gestures.toml` NOT yet run on Tarun's hand. (94c6cca, f5ec107)
-- Launched-window fixes: free-slot spawn, depth pull-in, focus on spawn, `recall_panel` on relaunch. (Sun morning; see `shell/HACK_CHANGES.md`)
-- Depth-cast placement + full pose: wall error 0.05 m. (README results table)
-- Check-in 1 (hour 12) and check-in 2 (hour 24) submitted; `docs/checkpoint-{1,2}-submission.md`.
-- Handoff docs: `NEXT-SESSION.md`, README checkpoint log, `shell/HACK_CHANGES.md`. (f055a7f, 7af47ff, 7a5dea3)
+Done (this session, all pushed to main):
+- Handoff files created: AGENTS.md + CLAUDE.md (@AGENTS.md). (3259f4c)
+- Check-in-3 submission doc drafted: docs/checkpoint-3-submission.md (structure from check-in-2; what changed since check-in 2 = people layer + launched-window fixes + hands gate; honest limits; 60s video TBD). (98d1dbd)
+- Placement eval extended: +10 requests (ids 21-30) in agent/eval/requests.json — 5 desk-in-view (expect:"table"), 5 object-anchored (expect:"object" + anchor); agent/eval/RUNBOOK.md. (75da639)
+- Scorer closed the object-anchor gap: agent/src/tempo/eval.py scores expect:"object" by Euclidean distance to the anchor object's 3D pos (threshold ANCHOR_NEAR_M=0.30), missing anchor = anchor_not_found; additive, legacy unchanged; 12 tests green. (d26218b)
+- Vertex AI opt-in inference path: agent/src/tempo/brain.py, TEMPO_USE_VERTEX=1 + TEMPO_VERTEX_PROJECT/TEMPO_VERTEX_LOCATION (defaults eastwest72hack26bos-505/us-central1), ADC, try/except fallback to API-key client; 16 tests green; no creds in code. (074833c)
+- WiLoR offline batch runner: hands/wilor_batch.py (record/run/compare; reuses hands geometry pipeline), hands/WILOR_DEPLOY.md (GCE L4 runbook), hands/wilor_requirements.txt; targets rolpotamias/WiLoR CVPR 2025; one gated step = MANO_RIGHT.pkl from mano.is.tue.mpg.de. (7f07b73)
+- Rig brought up: mac-shell pid 41795, packet_rate=3540, 3 panels, frame-export ON 30 Hz rgb8; daemons in detached screen sessions (hands 49318 / people 49316 / objects 49317); tempo scene sees 398 objects, 1 remembered place (charger), 1 person present.
 
 In flight:
-- Check-in 3 (Sun 7 PM PT) — CONFIRM WITH TARUN whether the 7 PM card was stamped. Doc structure from `docs/checkpoint-2-submission.md`; must say what changed since check-in 2 (people bubbles live, hand-launch on camera). NOT yet written.
-- Hardware session (needs Tarun, ~10 min): (1) point phone at a face, say "I'm Tarun" + two sentences, verify bubble + summary; (2) `uv run hands calibrate --write` then restart shell, record per-phase jitter; (3) fist -> launcher -> pinch on camera = check-in-3 video; (4) `tempo people me Tarun`.
+- gcloud CLI installed (584.0.0). Awaiting Tarun's `gcloud auth login` + `gcloud auth application-default login` + `gcloud config set project eastwest72hack26bos-505` to enable Vertex AI + Compute APIs and run the WiLoR GCE batch.
 
-Blocked:
-- mac-shell (Spatula.app) is NOT running; control socket `$TMPDIR/spatial-os.sock` is gone. Last exported frame is 4:45 PM PT (~3h stale). `hands track` (pid 9829), `tempo people` (pid 11106), `tempo objects` (pid 38976) daemons are running but feeding on that stale frame — zombies. Reopen SpatialBridge on the iPhone AND relaunch mac-shell (`shell/scripts/run-mac.sh --restart`) before any verification.
-- `gestures.toml` still does not exist; `hands calibrate --write` has never been run on Tarun's hand. Cheapest fix for the standing "gestures barely work" complaint.
-- siyi CRM notes need `TEMPO_SIYI_URL` + `TEMPO_SIYI_KEY` in the agent env (Supabase URL + service key from `~/TarunsCode/shared/siyi.app`).
+Blocked (on Tarun):
+- Hardware session (~10 min): (1) point phone at a face, say "I'm Tarun" + two sentences, verify bubble + summary; (2) `uv run hands calibrate --write` then restart shell, record per-phase jitter; (3) fist -> launcher -> pinch on camera = check-in-3 video; (4) `tempo people me Tarun`.
+- Placement eval run needs the desk + target objects in the camera view (Tarun positions the rig); then `uv run tempo eval` per agent/eval/RUNBOOK.md.
+- WiLoR frame recording needs a hand in view — record during the hardware session (`hands/wilor_batch.py record --live "$TMPDIR/spatula-frames" --out <batchset> --seconds 30`).
+- MANO_RIGHT.pkl gated download (free registration at mano.is.tue.mpg.de) — the one non-scriptable WiLoR step.
+- gestures.toml still does not exist; hands calibrate --write never run on Tarun's hand.
+- siyi CRM notes need TEMPO_SIYI_URL + TEMPO_SIYI_KEY in agent env (Supabase from ~/TarunsCode/shared/siyi.app).
 
 Next (in priority order):
-1. Confirm check-in-3 deadline/submission status with Tarun (briefing said Sun 7 PM PT; his checkpoint-1 correction was midnight — confirm before assuming).
-2. Bring the rig up: reopen SpatialBridge on the iPhone, `shell/scripts/run-mac.sh --restart`, restart the three daemons against a live export dir. Verify `packet_rate > 0`.
-3. Hardware session (above, ~10 min with Tarun) -> check-in-3 video.
-4. Check-in-3 doc + upload to Drive (Team Submissions -> deep tech -> Tempo). Only Tarun uploads.
-5. Placement eval with the desk in view + object-anchored requests (`agent/eval/requests.json`); update the README results table.
-6. Bubble UX: a compact person card would read better than the full-size note panel (`control_server.cpp` `parse_note_json` takes title/body/accent only today).
-7. Pico bring-up (pose/depth streaming from a microcontroller-class board) — promised in the check-in-2 doc as "start"; keep it honest.
-8. Google Cloud credits (OFF the critical path; see `NEXT-SESSION.md` "Google Cloud" section): (a) move agent inference onto Vertex AI on sponsored quota, behind an env switch so a project deleted Mon 9 AM PT cannot take the demo down; (b) run WiLoR as an offline batch on one L4 GCE VM to publish the numbers promised to judges. Do NOT wire a live cloud hop into the demo loop. Tarun must pull username/password from his row; `gcloud` is not installed yet.
+1. Hardware session (above) -> check-in-3 video (OVERDUE; check-in 3 was due Sun 7 PM PT). Confirm with Tarun whether the 7 PM card was stamped.
+2. Run the placement eval with desk in view + object-anchored requests; update the README results table.
+3. Record the WiLoR frame set (hand in view), then run hands/wilor_batch.py on a GCE L4 (after gcloud auth) to publish WiLoR-vs-RTMPose accuracy + latency; tear the VM down before Mon 9 AM PT.
+4. Optionally flip TEMPO_USE_VERTEX=1 once ADC is authed (off critical path; falls back to API key if Vertex fails).
 
 Notes:
-- Never `git add -A` while background agents edit; stage by path.
-- The Gemini key lives in the agent env file; hooks block Claude from touching it and the bash-guard rejects any Bash command that names the file. Test env-dependent code through the CLI (`tempo ...`), never name the file in a command.
+- Daemons run in screen sessions tempo-hands/tempo-people/tempo-objects (reattach `screen -r`); logs at $TMPDIR/tempo-logs/{hands,people,objects}.log.
+- Never git add -A while background agents edit; stage by path.
+- The Gemini key lives in the agent env file; hooks block Claude from touching it and bash-guard rejects any Bash command naming it. Test env-dependent code via the CLI (tempo ...), never name the file in a command.
 - Git push from a normal terminal on the Mac (not device_bash).
-- Google Cloud project `eastwest72hack26bos-505` is hard-deleted Mon Sep 14 noon ET = 9 AM PT = the final deadline. Nothing built on those credits can sit on the demo's critical path.
+- Google Cloud project eastwest72hack26bos-505 is hard-deleted Mon Sep 14 noon ET = 9 AM PT = the final deadline. Nothing built on those credits can sit on the demo's critical path.
 - Scores so far: check-in 1 (8/4/6/8), check-in 2 (7/6/7/7) across Innovation/Technical/Business/Presentation. Innovation dropped a point at check-in 2; check-in 3 must show a visibly new capability on camera (people bubbles, hand-launch), not fixes.
