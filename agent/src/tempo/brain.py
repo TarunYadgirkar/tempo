@@ -11,6 +11,60 @@ from .perception import Snapshot
 
 DEFAULT_MODEL = "gemini-3.6-flash"
 
+# Vertex AI opt-in. The API-key path stays the default; Vertex is used only when
+# TEMPO_USE_VERTEX=1. On any Vertex construction failure we log one line and fall
+# back to the API-key client — never crash. The Google Cloud project below is
+# not secret (it is already published in context/EVENT.md) and is hard-deleted
+# Mon Sep 14 9 AM PT, which is exactly why Vertex must stay opt-in.
+DEFAULT_VERTEX_PROJECT = "eastwest72hack26bos-505"
+DEFAULT_VERTEX_LOCATION = "us-central1"
+
+# One module-level client. A temporary `genai.Client` gets closed mid-call by
+# the SDK (see NEXT-SESSION.md `people.summarize` gotcha), so we cache a single
+# instance for the process.
+_client: genai.Client | None = None
+
+
+def _build_client() -> genai.Client:
+    """Return the process-wide Gemini client, building it on first use.
+
+    Order:
+      1. Require GEMINI_API_KEY (needed for the default path and the Vertex fallback).
+      2. If TEMPO_USE_VERTEX=1, try a Vertex AI client (ADC, no API key) with
+         project/location overrides; on any failure, log one line and fall back.
+      3. Otherwise (or after a Vertex fallback) build the API-key client.
+    """
+    global _client
+    if _client is not None:
+        return _client
+
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        raise SystemExit("GEMINI_API_KEY is not set (put it in the agent env file)")
+
+    if os.environ.get("TEMPO_USE_VERTEX") == "1":
+        project = os.environ.get("TEMPO_VERTEX_PROJECT", DEFAULT_VERTEX_PROJECT)
+        location = os.environ.get("TEMPO_VERTEX_LOCATION", DEFAULT_VERTEX_LOCATION)
+        try:
+            _client = genai.Client(vertexai=True, project=project, location=location)
+            return _client
+        except Exception as exc:  # noqa: BLE001 - any Vertex failure must fall back
+            print(
+                f"[tempo] Vertex AI unavailable ({project}/{location}), "
+                f"falling back to API-key client: {exc}",
+                flush=True,
+            )
+
+    _client = genai.Client(api_key=key)
+    return _client
+
+
+def _reset_client() -> None:
+    """Drop the cached client (tests only: lets each test start clean)."""
+    global _client
+    _client = None
+
+
 SYSTEM = """You are Tempo, the agent inside a pair of spatial computing glasses.
 You see what the wearer sees (the image) and you know the room's geometry (the scene JSON:
 head position, detected surfaces with kinds and distances, and the panels already floating in the room).
@@ -26,10 +80,7 @@ and remember_place when they tell you where something lives. If the request need
 class Brain:
     def __init__(self, model: str | None = None, geometry: bool = True) -> None:
         self.geometry = geometry
-        key = os.environ.get("GEMINI_API_KEY")
-        if not key:
-            raise SystemExit("GEMINI_API_KEY is not set (put it in the agent env file)")
-        self.client = genai.Client(api_key=key)
+        self.client = _build_client()
         self.model = model or os.environ.get("TEMPO_MODEL", DEFAULT_MODEL)
 
     def decide(self, request: str, snap: Snapshot, audio: bytes | None = None) -> tuple[list[types.FunctionCall], str]:
