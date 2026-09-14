@@ -18,5 +18,17 @@
   {"id": 17, "text": "put a note on the wall behind the monitor that says standup at 10", "expect": "wall"},
   {"id": 18, "text": "leave a sticky note on the table that says keys are in the drawer", "expect": "table"},
   {"id": 19, "text": "open safari where I'm looking", "expect": "gaze"},
-  {"id": 20, "text": "put a note on the wall that says rent due friday", "expect": "wall"}
+  {"id": 20, "text": "put a note on the wall that says rent due friday", "expect": "wall"},
+
+  {"id": 21, "text": "put a note on the desk that says standup at 10", "expect": "table", "group": "desk-in-view", "note": "desk horizontal surface must be in the camera view"},
+  {"id": 22, "text": "drop a shopping list on the table", "expect": "table", "group": "desk-in-view"},
+  {"id": 23, "text": "open notes on the table", "expect": "table", "group": "desk-in-view"},
+  {"id": 24, "text": "put my todo list on the desk", "expect": "table", "group": "desk-in-view"},
+  {"id": 25, "text": "leave a note on the table that says charge the headset", "expect": "table", "group": "desk-in-view"},
+
+  {"id": 26, "text": "put a note next to the lamp that says bedtime", "expect": "object", "anchor": "lamp", "group": "object-anchored"},
+  {"id": 27, "text": "open spotify by the whiteboard", "expect": "object", "anchor": "whiteboard", "group": "object-anchored"},
+  {"id": 28, "text": "put a reminder next to my charger: unplug at 6", "expect": "object", "anchor": "charger", "group": "object-anchored", "note": "charger is not in the OWL-ViT default vocabulary; tests the image / remembered-place fallback"},
+  {"id": 29, "text": "leave a note by the plant that says water me", "expect": "object", "anchor": "plant", "group": "object-anchored"},
+  {"id": 30, "text": "open messages next to the monitor", "expect": "object", "anchor": "monitor", "group": "object-anchored"}
 ]
