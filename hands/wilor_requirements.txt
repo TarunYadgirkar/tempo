@@ -1,0 +1,42 @@
+# Pinned deps for hands/wilor_batch.py (--backend wilor).
+# This file is NOT used by the hands uv project (hands/pyproject.toml); it is
+# installed in a separate venv on the GCE L4 VM. See hands/WILOR_DEPLOY.md.
+#
+# WiLoR (https://github.com/rolpotamias/WiLoR) targets Python 3.10 + PyTorch
+# 2.0.0 + CUDA 11.7. The detector checkpoint (detector.pt) is an Ultralytics
+# YOLO model that imports ultralytics.nn.modules.* symbols, so ultralytics
+# is pinned to the version the repo was built against (8.1.34).
+#
+# Install torch separately first (CUDA 11.7 wheel), then the rest:
+#   pip install torch==2.0.0 torchvision==0.15.1 --index-url https://download.pytorch.org/whl/cu117
+#   pip install -r hands/wilor_requirements.txt
+#
+# Then clone the WiLoR repo (it is NOT on PyPI) and put it on PYTHONPATH via
+# --wilor-root, and fetch the checkpoints + MANO_RIGHT.pkl -- see WILOR_DEPLOY.md.
+
+# torch installed separately above (CUDA 11.7 wheel)
+numpy>=1.24,<2.0
+opencv-python==4.8.1.78
+ultralytics==8.1.34
+timm==0.9.7
+einops==0.7.0
+smplx==0.1.28
+pytorch-lightning==2.1.0
+scikit-image==0.22.0
+yacs==0.1.8
+chumpy @ git+https://github.com/mattloper/chumpy
+xtcocotools==1.13
+pandas==2.1.4
+hydra-core==1.3.2
+hydra-submitit-launcher==1.2.0
+hydra-colorlog==1.2.0
+pyrootutils==1.0.4
+rich==13.7.0
+webdataset==0.2.86
+Pillow>=10.0.0
+
+# pyrender is in WiLoR's requirements but is only used by the demo's mesh
+# renderer; landmark inference does not need it. Left out to avoid the
+# PyOpenGL / system-display dependency on a headless VM. Re-add if you want
+# the demo's visual output:
+#   pyrender==0.1.45
