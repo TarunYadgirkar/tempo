@@ -42,10 +42,27 @@ BUBBLE_UP_M = 0.04
 BUBBLE_MOVE_M = 0.06    # re-pose only when the head moved this much
 BUBBLE_MIN_REPOSE_S = 0.25
 FRAME_POLL_S = 0.12
+# Spatial re-identification: a face seen within this radius+time of a recent sighting is the same
+# person, so one person in view keeps one bubble instead of fragmenting into a new face each frame
+# (ArcFace cross-frame cosine hovers ~0.40 < FACE_MATCH 0.42 and would otherwise spawn duplicates).
+TRACK_WINDOW_S = 4.0
+TRACK_RADIUS_M = 0.35
+# Words that can follow "I'm"/"this is" but are not a name. Whisper capitalizes proper nouns,
+# so the NAME regex below requires a capital first letter; this set is the second line of defense
+# against sentence-initial capitals ("This is The ...") and rare capitalized filler.
 STOPWORDS = {"the", "a", "an", "my", "your", "it", "what", "how", "not", "so", "just", "going", "really",
-             "here", "there", "me", "him", "her", "good", "great", "fine", "okay", "ok", "done", "back"}
-# The cue is case-insensitive; the name keeps its case so "and" never becomes a surname.
-NAME = r"([A-Za-z][a-z]+(?:\s+[A-Z][a-z]+)?)"
+             "here", "there", "me", "him", "her", "good", "great", "fine", "okay", "ok", "done", "back",
+             "gonna", "wanna", "gotta", "kinda", "sick", "obviously", "actually", "basically", "literally",
+             "very", "sorry", "sure", "yeah", "yes", "no", "like", "doing", "feeling", "looking", "trying",
+             "getting", "ready", "tired", "hungry", "late", "busy", "awesome", "cool", "glad", "happy",
+             "sad", "bored", "excited", "confused", "worried", "look", "listen", "man", "dude", "guys",
+             "everyone", "everybody", "someone", "somebody", "nothing", "something", "everything",
+             "anything", "finished", "stuffed", "full", "drunk", "sleepy", "scared", "afraid", "nervous",
+             "anxious", "proud", "honored", "blessed", "alright", "right", "still", "now", "again", "home"}
+# The cue is case-insensitive; the NAME keeps its case so "and" never becomes a surname.
+# The first letter must be uppercase: Whisper capitalizes proper nouns, so "I'm gonna" (lowercase g)
+# never becomes a name, while "I'm Tarun" does.
+NAME = r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"
 FIRST_PERSON = re.compile(r"\b(?i:i am|i'm|im|my name is|my name's|call me)\s+" + NAME)
 THIRD_PERSON = re.compile(r"\b(?i:this is|that's|that is|meet|say hi to|say hello to|her name is|his name is|their name is)\s+" + NAME)
 
@@ -378,17 +395,23 @@ class PeopleDaemon:
         faces = self.engine.faces(rgb)
         with self.people.lock:
             for face in faces:
-                person, score = self.people.match("face", face.embedding)
-                if person is None:
-                    person = self.people.new("face", face.embedding)
-                    self.log(f"people: new face {person.id} (best {score:.2f})")
-                elif score < BANK_NOVELTY:
-                    person.add_embedding("face", face.embedding)
-                person.last_seen, person.seen_count = now, person.seen_count + 1
                 pos = self.locate(face, head, intr, depth, (image.width, image.height))
+                tracked = self._track(pos, now)
+                if tracked is not None:
+                    person = tracked
+                    person.add_embedding("face", face.embedding)
+                else:
+                    person, score = self.people.match("face", face.embedding)
+                    if person is None:
+                        person = self.people.new("face", face.embedding)
+                        self.log(f"people: new face {person.id} (best {score:.2f})")
+                    elif score < BANK_NOVELTY:
+                        person.add_embedding("face", face.embedding)
+                person.last_seen, person.seen_count = now, person.seen_count + 1
                 self.recent[person.id] = Sighting(person, face, pos, now)
                 self.enrich(person)
                 self.bubbles.show(person, pos, self.head_pos, now)
+            self._prune_recent(now)
             self.bubbles.sweep(self.people, now)
         if faces:
             self.people.save()
@@ -404,6 +427,23 @@ class PeopleDaemon:
             d = intr["fy"] * 0.16 / max(face.box[3] * scale, 1.0)
         cam = objects.unproject(u * scale, v * scale, d, intr)
         return objects.to_scene(cam, head)
+
+    def _track(self, pos: spatial.Vec3, now: float) -> Person | None:
+        """A face within TRACK_RADIUS_M of a sighting in the last TRACK_WINDOW_S is the same person."""
+        best, best_d = None, TRACK_RADIUS_M
+        for s in self.recent.values():
+            if now - s.at > TRACK_WINDOW_S:
+                continue
+            d = math.dist(pos, s.pos)
+            if d <= best_d:
+                best, best_d = s.person, d
+        return best
+
+    def _prune_recent(self, now: float) -> None:
+        """Drop sightings old enough that no track or focus can still reference them."""
+        cutoff = max(TRACK_WINDOW_S, FOCUS_WINDOW_S) + BUBBLE_GONE_S
+        for pid in [pid for pid, s in self.recent.items() if now - s.at > cutoff]:
+            self.recent.pop(pid, None)
 
     def enrich(self, person: Person) -> None:
         if person.name and person.siyi_checked_for != person.name and siyi.configured():

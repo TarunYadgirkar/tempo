@@ -19,6 +19,15 @@ def test_parse_name_keeps_case_and_drops_filler():
     assert pp.parse_name("I'm going home") is None
 
 
+def test_parse_name_rejects_lowercase_filler_after_im():
+    # Whisper hallucinations that previously became false names: "I'm gonna", "I'm sick",
+    # "I'm obviously". The name must start with a capital letter, so these are not names.
+    assert pp.parse_name("I'm gonna have my little teleporting thing") is None
+    assert pp.parse_name("I'm sick of this") is None
+    assert pp.parse_name("I'm obviously going to do it") is None
+    assert pp.parse_name("I'm Tarun") == ("self", "Tarun")
+
+
 def test_match_then_name_merges_duplicates(tmp_path):
     store = pp.People(tmp_path / "people.json")
     a = store.new("face", unit(1))
@@ -72,3 +81,21 @@ def test_summary_cadence(tmp_path, monkeypatch):
     assert p.wants_summary()
     assert (tmp_path / "c.jsonl").read_text().count("\n") == 5
     assert "talked about lines" in pp.bubble_text(p)[1]
+
+
+def test_spatial_track_reuses_nearby_face(tmp_path):
+    """A face seen within TRACK_RADIUS_M of a recent sighting is the same person,
+    so one person in view keeps one bubble instead of fragmenting per frame."""
+    store = pp.People(tmp_path / "people.json")
+    person = store.new("face", unit(1))
+    daemon = pp.PeopleDaemon.__new__(pp.PeopleDaemon)
+    daemon.recent = {}
+    daemon.people = store
+    # First sighting at z=-1.0; a moment later a face reappears 0.05 m away (same person).
+    face = pp.Face(box=(0, 0, 10, 10), score=1.0, embedding=unit(2))
+    daemon.recent[person.id] = pp.Sighting(person, face, (0.0, 0.0, -1.0), 0.0)
+    assert daemon._track((0.05, 0.0, -1.0), 0.5) is person
+    # A face 0.5 m away is too far -> no spatial track.
+    assert daemon._track((0.5, 0.0, -1.0), 0.5) is None
+    # After TRACK_WINDOW_S the track expires.
+    assert daemon._track((0.05, 0.0, -1.0), pp.TRACK_WINDOW_S + 1.0) is None

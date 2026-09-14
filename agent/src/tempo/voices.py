@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -21,14 +22,16 @@ BLOCK = 480  # 30 ms at 16 kHz
 MIN_SEGMENT_S = 0.8
 MAX_SEGMENT_S = 12.0
 SILENCE_END_S = 0.7
-SPEECH_FLOOR_RMS = 250.0
+SPEECH_FLOOR_RMS = 320.0
 SPEECH_OVER_NOISE = 3.0
 VOICEPRINT_MIN_S = 1.0
 # Amelia's attribution threshold for ECAPA cosine.
 VOICE_MATCH = 0.6
 ECAPA_DIR = Path(os.environ.get("TEMPO_ECAPA_DIR") or Path.home() / ".cache" / "tempo" / "ecapa")
-# Whisper's favourite hallucinations on near-silence.
-JUNK = {"", "you", "thank you.", "thanks for watching.", "bye.", "thank you", "."}
+# Whisper's favourite hallucinations on near-silence / short bursts.
+JUNK = {"", "you", "thank you.", "thanks for watching.", "bye.", "thank you", ".",
+        "yeah.", "yes.", "no.", "ok.", "okay.", "sure.", "sorry.", "right.", "wow.",
+        "hmm.", "mm-hmm.", "uh-huh.", "laughs", "music", "[music]", "(music)", "?"}
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,10 @@ class Ear:
             try:
                 text = transcribe(pcm).strip()
                 if text.lower() in JUNK or len(text) < 2:
+                    continue
+                # Drop transcripts that are only punctuation / filler noise.
+                letters = re.sub(r"[^A-Za-z]", "", text)
+                if len(letters) < 2:
                     continue
                 self._on_segment(Segment(text, voiceprint(pcm), len(pcm) / RATE, time.time()))
             except Exception as exc:  # a bad segment must not kill the ear
