@@ -1,73 +1,93 @@
 # Next session, start here
 
-Written Sat Sep 12 2026, 11:50 PM PT, end of the checkpoint-1 session. Read this, then `README.md` (checkpoint log at the bottom), then `shell/HACK_CHANGES.md`.
+Written Sun Sep 13 2026, 7:15 PM PT. Read this, then `README.md` (checkpoint log near the bottom), then `shell/HACK_CHANGES.md`. Everything below is committed and pushed to https://github.com/TarunYadgirkar/tempo (main).
 
 ## What Tempo is, in one paragraph
 
-Tarun's solo entry to the East v. West 72 Hour Hackathon, Deep Tech / Physical AI track, freestyle. It is Vantage (his AR-glasses startup with Boris, Project Ithaca, currently interviewing with a16z) rebuilt around a room agent: iPhone streams ARKit pose + LiDAR + camera + hands to a Mac; the Mac compositor (`shell/`, carried over from Spatula) renders real Mac windows in 3D; a Python agent (`agent/`) sends Gemini the view plus a scene graph (head pose, depth casts, objects, remembered places, hand aim, panels) and executes spatial actions. Hand tracking was moved onto the Mac (`hands/`, RTMPose + LiDAR). Judges score every 12 h on innovation / technical / business / presentation.
+Tarun's solo entry to the East v. West 72 Hour Hackathon, Deep Tech / Physical AI track. It is Vantage (his AR-glasses startup with Boris, Project Ithaca) rebuilt around a room agent: iPhone (SpatialBridge app) streams ARKit pose + LiDAR + camera to a Mac; the Mac compositor (`shell/`, carried over from Spatula) renders real Mac windows in 3D; a Python agent (`agent/`) sends Gemini the view plus a scene graph and executes spatial actions; hand tracking runs on the Mac (`hands/`, RTMPose + LiDAR). New this cycle: a people layer (faces, voices, a bubble beside each head with name and what you talked about). Judges score every 12 h on innovation / technical / business / presentation, and the placement score is the final plus the average of the five check-ins, so every check-in needs a demoable build.
+
+## Scores so far
+
+| Check-in | Innovation | Technical | Business | Presentation | Judge feedback |
+|---|---|---|---|---|---|
+| 1 (hour 12) | 8 | 4 | 6 | 8 | Position as "memory for AR"; why won't Apple/Meta build it natively; name 2-3 killer use cases ("where is my charger" is a good one). |
+| 2 (hour 24) | 7 | 6 | 7 | 7 | The differentiator is that it is *directional* (points you to where something is) plus persistent spatial memory. |
+
+Innovation dropped a point at check-in 2. Check-in 3 must show a visibly new capability on camera (people bubbles, hand-launch), not fixes. The "directional memory" framing is for this hackathon's pitch only; do not carry it into Ithaca/Vantage material.
 
 ## Deadlines and submission mechanics
 
-- Checkpoint 1 was due Sat 11:59 PM PT (Tarun's correction; the briefing said 7 PM). Confirm the remaining times with Tarun before assuming: briefing says Sun 7 AM, Sun 7 PM, Mon 7 AM PT, final Mon 9 AM PT, but the checkpoint-1 correction suggests they may be midnight/noon.
-- Each checkpoint: 60 s video + a doc with the repo link and a what-changed paragraph, dropped in Google Drive → Team Submissions (12 hour cycle) → deep tech → `Tempo`. Only Tarun can upload the video.
-- Code lives ONLY at https://github.com/TarunYadgirkar/tempo (main). Do NOT push project code to the official hackathon fork or open upstream PRs until Tarun says so (he reversed that on Sat). The fork `BTC-2026/teams/Tempo` holds a pointer README.
+- Check-ins are every 12 h; the check-in-2 card was stamped hour 24. Confirm the exact next deadline with Tarun before assuming (the briefing said Sun 7 AM / Sun 7 PM / Mon 7 AM PT, final Mon 9 AM PT; his checkpoint-1 correction was midnight).
+- Each check-in: 60 s video + a doc (repo link, what changed) in Google Drive → Team Submissions (12 hour cycle) → deep tech → `Tempo`. Only Tarun uploads. `docs/checkpoint-1-submission.md` and `docs/checkpoint-2-submission.md` are the texts he used; reuse the structure.
+- Code lives ONLY in this repo. Do NOT push to the official hackathon fork or open upstream PRs until Tarun says so.
 - Final also emailed to hackofthrones@gmail.com. Google Cloud env is hard-deleted Mon Sep 14 noon ET.
-- `docs/checkpoint-1-submission.md` is the text Tarun pasted into the checkpoint-1 doc; reuse its structure for checkpoint 2 (Why me, what we're building, question, what shipped, next 12 h, feedback wanted).
 
 ## How to bring the rig up
 
 ```bash
 cd "/Users/tarunyadgirkar/TarunsCode/east west hackathon/tempo"
-shell/scripts/build-mac.sh && shell/scripts/test-mac.sh        # 31 ctest
-shell/scripts/run-mac.sh --restart                              # installs /Applications/Spatula.app, launches, phone auto-connects
+shell/scripts/build-mac.sh && shell/scripts/test-mac.sh        # 21 mac-shell + 8 gesture-engine + 2 bridge tests
+shell/scripts/run-mac.sh --restart                              # installs /Applications/Spatula.app and launches it
 export SPATIAL_OS_SOCK="$TMPDIR/spatial-os.sock"
-cd hands && uv run hands track --dir "$TMPDIR/spatula-frames" --enable-export --raw &   # Mac hand tracking daemon
-cd ../agent && uv run tempo objects --frames "$TMPDIR/spatula-frames" &                   # object map daemon
-uv run tempo scene            # what the agent sees
-uv run tempo --speak ask put a note on the wall that says hello
-uv run tempo live             # pinch-and-talk (local whisper)
-uv run tempo eval geometry pixels     # 20-request placement eval, closes all panels first
-cd ../hands && uv run hands eval --dir "$TMPDIR/spatula-frames" --seconds 60 --window-s 5   # phone vs mac hand jitter
-uv run hands check --dir "$TMPDIR/spatula-frames"                                          # reprojection check
+cd hands  && uv run hands track --dir "$TMPDIR/spatula-frames" --enable-export --raw &   # Mac hand tracking (~18 fps)
+cd ../agent && uv run tempo people --frames "$TMPDIR/spatula-frames" &                    # faces + voices + bubbles, mic open
+uv run tempo objects --frames "$TMPDIR/spatula-frames" &                                   # object map (optional)
+uv run tempo scene                          # what the agent sees (now includes `people`)
+uv run tempo --speak ask who is in the room
+uv run tempo live                           # pinch-and-talk
+uv run tempo people list | forget NAME | summarize NAME | me Tarun   # store admin; `me` records 6 s of the wearer's voice
+cd ../hands && uv run hands calibrate --write                          # open / pinch / fist, 6 s each -> ~/.config/spatial-os/gestures.toml (shell restart to load)
 ```
 
-Checks before assuming anything is broken: `pgrep -fl mac-shell`; `printf 'stats\n' | nc -U $TMPDIR/spatial-os.sock` (packet_rate=0 means the phone app is closed; ask Tarun to reopen SpatialBridge). `frame-export status` must say `on` for the hands/objects daemons to get frames; run-mac restart turns it off, re-enable with `frame-export on <dir> --raw`.
+Checks: `pgrep -fl mac-shell`; `printf 'stats\n' | nc -U $TMPDIR/spatial-os.sock` (use the Python client in `hands/src/hands/control.py` if nc prints nothing). `packet_rate=0` means the phone is not streaming. `frame-export status` must be `on` for the hands/people/objects daemons; a shell restart turns it off, `hands track --enable-export` turns it back on. Restarting the shell needs Tarun's OK when he might be recording.
 
-Gemini key is in `agent/.env` (`GEMINI_API_KEY`, model `gemini-3.6-flash`); the hooks block Claude from writing env files, Tarun pastes via `open -e`. Whisper model is `mlx-community/whisper-large-v3-turbo`, cached.
+Gemini key: `GEMINI_API_KEY` in the agent's env file, model `gemini-3.6-flash`. Hooks block Claude from touching that file, and the bash-guard hook rejects any Bash command whose text even mentions its filename: test env-dependent code through the CLI (`tempo ...`), never name the file in a command.
+
+### Phone (SpatialBridge)
+
+- Xcode project `~/TarunsCode/ithaca/Spatula/iphone-bridge/SpatialBridge.xcodeproj`, scheme `SpatialBridge`, bundle `com.spatialos.spatialbridge`, Tarun's iPhone 17 Pro device id `02685A41-CDBC-50E8-8883-8EEE10889194`. Reinstall over USB: `xcodebuild -project ... -scheme SpatialBridge -destination "id=<id>" -allowProvisioningUpdates build`, then `xcrun devicectl device install app --device <id> <.app>` and `... process launch --device <id> com.spatialos.spatialbridge`. Done once on Sun Sep 13.
+- A fresh install must accept iOS's Local Network prompt before it sends anything. The app browses Bonjour `_spatialbridge._udp` and also has manual host entry (default port 9898); on campus Wi-Fi Bonjour may be blocked, so enter the Mac's IP. Phone and Mac must share a network (or the phone's hotspot).
 
 ## State of each piece
 
-| Piece | State | Evidence |
+| Piece | State | Where |
 |---|---|---|
-| Agent loop (voice/typed → Gemini → actions) | live, 3 to 4 s/request | README checkpoint log |
-| Surface placement via depth cast + full pose | live; wall error 0.05 m vs 0.32 m image-only | `agent/eval/results/`, README table |
-| Object map (OWL-ViT, LiDAR-unprojected, persisted) | live at conf 0.25; "next to the whiteboard" worked once | `~/.config/tempo/objects.json` |
-| Spatial memory, layouts | implemented, memory demoed once; layouts untested on hardware | `agent/src/tempo/memory.py`, shell `layout` verbs |
-| Pinch-and-talk (`tempo live`) | implemented, never tested with a real pinch | `agent/src/tempo/live.py` |
-| Mac hand tracking (RTMPose + LiDAR) | live, 10-14 fps, 55 ms e2e; detection 97%; jitter was 36 mm/joint before the palm-range + filter fixes, which are in but UNMEASURED on a real hand | `hands/results/eval-20260913T011508Z.md` |
-| Gesture thresholds (pinch/point/fist) | untuned; Tarun says gestures barely work | gesture-engine calibrate tool exists in shell/gesture-engine/tools |
+| Agent loop (voice/typed → Gemini → actions) | live, 3 to 4 s/request | `agent/src/tempo/{brain,actions,live}.py` |
+| Placement via depth cast + full pose | live; wall error 0.05 m | README results table, `agent/eval/results/` |
+| Launched windows | FIXED Sun: free-slot spawn, depth pull-in, new panel takes focus, relaunch recalls instead of duplicating (`scene::recall_panel`) | `shell/mac-shell/src/core/scene.cpp`, `platform/capture.mm` |
+| Mac hand tracking | live ~18 fps; phantom hands past 1 m / conf < 0.5 gated (`--max-range-m`, `--min-confidence`) | `hands/src/hands/tracker.py` |
+| Gesture thresholds | `hands calibrate` written and unit-tested; NOT yet run on Tarun's hand | `hands/src/hands/calibrate.py` |
+| People layer | written, verified offline (3 faces on a real frame; TTS audio: names parsed, ECAPA 0.89 same / 0.0 cross speaker; Gemini summary works). NOT yet run with a face in front of the live rig | `agent/src/tempo/{people,faces,voices,siyi}.py`, `agent/tests/test_people.py` |
+| Object map | live at conf 0.25 | `agent/src/tempo/objects.py` |
+| siyi (CRM) notes in bubbles | code done, needs `TEMPO_SIYI_URL` + `TEMPO_SIYI_KEY` in the agent env (Supabase URL + service key from `~/TarunsCode/shared/siyi.app`) | `agent/src/tempo/siyi.py` |
 
-## Next 12 hours, as promised to the judges in the checkpoint-1 doc
+Stores: `~/.config/tempo/people.json`, `~/.config/tempo/conversations.jsonl`, `~/.config/tempo/objects.json`, `~/.config/tempo/memory.json`. Face models in `agent/models/` (gitignored; copied from `~/TarunsCode/facelock/models` or downloaded). ECAPA weights cache at `~/.cache/tempo/ecapa`.
 
-1. Hands: with Tarun's hand up, run `hands eval` (alternating phone/mac windows) and `hands check`; publish before/after jitter. Then calibrate pinch/point/fist on his hand with the gesture engine's calibrate tool. Then try WiLoR on a GCE GPU (sponsored credits, project eastwest72hack26bos-505) for the pointing path and report round-trip latency vs local.
-2. Hardware: Tarun said the next 12 h is "sourcing glasses and hardware". Help him shortlist see-through display dev kits with camera + depth that can ship by Monday, and a wearable phone mount as fallback. The software already treats the phone as one sensor.
-3. Placement: rerun `tempo eval` with the desk in view (ask Tarun to point the phone at his desk), add object-anchored requests to `agent/eval/requests.json`, update the README table.
-4. Checkpoint-2 video + doc: same structure as checkpoint 1; must say what changed since.
+## How the demo gestures work
 
-## Things Tarun has said that constrain the work
+- Hold a fist ~300 ms → launcher opens; rotate the wrist to pick an entry (Test Card, Safari, Terminal, Finder); release → launches. Pinch = click on the aimed panel. Double-pinch on empty space → `gather-panels` fans every panel into an arc in front of you.
+- People: a face in view gets a "Someone new" bubble to the wearer's right of the head. Someone saying "I'm Alice" names their face and voice; the wearer saying "this is Bob" names the largest face in view. After 3 lines, Gemini writes a one-sentence summary into the bubble. `tempo ask who is this` answers from the scene's `people` block.
 
-- "This has to be insane and amazing" and "use great open source stuff": be ambitious, prefer open models (RTMPose, OWL-ViT, Whisper are in; WiLoR/HaMeR next).
-- Hand tracking quality is his number one complaint. Every skeleton offset so far has been a pipeline bug (filter lag), not model quality; check `hands check` before swapping models.
-- UI mode: polished. Design rules in `~/.claude/CLAUDE.md` apply to note cards and any UI.
-- Do not restart the shell while he might be recording; ask first. Restarting reconnects the phone automatically but kills frame export.
-- He wants to be told when a hardware session (his hand, his desk in view) is needed, in one line.
-- Never `git add -A` across the repo while background agents are mid-edit; it swept up half-finished files once. Stage by path.
+## Next: the hardware session that was never done (needs Tarun, ~10 min)
 
-## Known gaps and bugs
+1. Face: point the phone at a face (mirror, person, or a photo on a screen). Bubble should appear within a second. Say "I'm Tarun", then two sentences; the title should flip and a summary should appear. Check `/tmp/claude-people.log`-style output (`tempo people` prints `heard:` and `people:` lines).
+2. `uv run hands calibrate --write` (three prompted poses), then restart the shell to load `gestures.toml`. Record per-phase jitter in mm; put it in the README hands section.
+3. Fist → launcher → pinch on the window, on camera. That plus the people bubble is the check-in-3 video.
+4. `tempo people me Tarun` so the wearer's voice is never filed under a guest.
 
-- `agent/eval` scorer counts a desk request as wrong when no horizontal surface is in view (both conditions fail); that's the sensor's limit, documented in README.
-- Object detector at conf 0.25 still emits some false positives (headphones, clock); raise to 0.3 if it pollutes the scene JSON.
-- `hands status` reply format changed to `overlay=on source=phone|mac age_ms=N e2e_ms=N`.
-- `shell/HACK_CHANGES.md` still says the LiDAR map is 32x24; it is 256x192.
-- Left/right placement was once swapped because the portrait camera's axes leaked into "right"; fixed with forward x world-up. Watch for regressions if head math changes.
-- The `chirality` guess for RTMPose assumes a dorsal view (head-mounted camera); if left/right hands flip on the real rig, pass `--palmar-view`.
+## After that, in priority order
+
+1. Check-in 3 doc + video (structure from `docs/checkpoint-2-submission.md`; must say what changed since check-in 2).
+2. Placement eval with the desk in view + object-anchored requests (`agent/eval/requests.json`), update README table.
+3. Bubble UX: the note panel is full note size; a compact person card would read better. `note` JSON only takes title/body/accent today (`control_server.cpp` `parse_note_json`).
+4. Pico bring-up (pose/depth streaming from a microcontroller-class board) was promised in the check-in-2 doc as "start", keep it honest.
+5. WiLoR on a GCE GPU for the pointing path (sponsored credits, project eastwest72hack26bos-505), only if hands still feel bad after calibration.
+
+## Gotchas
+
+- Never `git add -A` while background agents edit; stage by path.
+- Shell tests: a new spawn now takes focus (`test_scene.cpp` was updated for this).
+- `hands` daemon `--enable-export` turns export off when it exits; killing it kills the frame feed for the other daemons.
+- Google Docs editing through the Chrome extension: keystrokes race the find dialog and cmd+a can replace the whole doc. Verify with the Drive `read_file_content` tool, click fields explicitly, triple-click to select field text, never cmd+a.
+- A temporary `genai.Client` gets closed mid-call; keep one module-level client (see `people.summarize`).
+- Camera TCC: processes launched from Claude sessions have no camera grant (mic is fine). Faces come from the shell's exported frames, not a webcam, so this does not affect the people daemon.
