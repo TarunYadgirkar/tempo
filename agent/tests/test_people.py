@@ -3,12 +3,61 @@ import math
 import numpy as np
 
 from tempo import people as pp
+from tempo import voices as vv
 
 
 def unit(seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     v = rng.standard_normal(512).astype(np.float32)
     return v / np.linalg.norm(v)
+
+
+def test_is_garbage_drops_whisper_hallucinations():
+    # The exact strings the live mic produced before the fix.
+    assert vv._is_garbage("subscribe dot com")
+    assert vv._is_garbage("code 218 00 00 00 00 00 00 00")
+    assert vv._is_garbage("shoot fold fold fold fold")
+    assert vv._is_garbage("Ok Ok")
+    assert vv._is_garbage("Uh Uh")
+    assert vv._is_garbage("...")
+    assert vv._is_garbage("thanks for watching.")
+    assert vv._is_garbage("Please subscribe.")
+    assert vv._is_garbage("ok")
+    assert vv._is_garbage("")
+    # Real speech survives the gate.
+    assert not vv._is_garbage("I'm Tarun and this is my apartment.")
+    assert not vv._is_garbage("Can you place the mug on the desk?")
+    assert not vv._is_garbage("Maroon red or I'm thinking about maroon.")
+
+
+def test_ear_finish_requires_minimum_speech_duration():
+    """A segment that is long enough overall but has <MIN_SPEECH_S of above-threshold
+    speech (a noise burst padded with silence) is not queued for transcription."""
+    ear = vv.Ear(lambda seg: None, log=lambda *a: None)
+    # Simulate: 1.0 s of silence (33 blocks) then a 0.1 s noise burst (3 blocks) then
+    # enough silence to end. Total > MIN_SEGMENT_S but speech < MIN_SPEECH_S.
+    ear._speaking = True
+    silence = np.zeros(vv.BLOCK, dtype="int16")
+    for _ in range(33):
+        ear._chunks.append(silence)
+        ear._silence_blocks += 1
+    burst = np.full(vv.BLOCK, 40, dtype="int16")  # below SPEECH_FLOOR_RMS
+    for _ in range(3):
+        ear._chunks.append(burst)
+        # _speech_blocks only counts blocks that cleared the threshold in _on_audio;
+        # emulate a burst that did not.
+    ear._speech_blocks = 3  # 3 * 30ms = 90ms < 0.4s
+    queued = []
+    ear._queue.put = queued.append  # type: ignore[assignment]
+    ear._finish()
+    assert queued == []
+    # Now with enough real speech it is queued.
+    ear._speaking = True
+    ear._chunks = [silence] * 10 + [np.full(vv.BLOCK, 2000, dtype="int16")] * 20
+    ear._speech_blocks = 20  # 600ms >= 0.4s
+    ear._silence_blocks = 0
+    ear._finish()
+    assert len(queued) == 1
 
 
 def test_parse_name_keeps_case_and_drops_filler():
@@ -26,6 +75,18 @@ def test_parse_name_rejects_lowercase_filler_after_im():
     assert pp.parse_name("I'm sick of this") is None
     assert pp.parse_name("I'm obviously going to do it") is None
     assert pp.parse_name("I'm Tarun") == ("self", "Tarun")
+
+
+def test_parse_name_rejects_nonalphabetic_and_overlong_names():
+    # A name must be alphabetic and 2-20 chars; garbage that Whisper once capitalized
+    # ("I'm Gonna" with a stray capital, numeric junk, a 25-char run) never enrolls.
+    assert pp.parse_name("I'm Gonna") is None            # "gonna" is a stopword
+    assert pp.parse_name("I'm 21800") is None            # numeric
+    assert pp.parse_name("this is A") is None            # too short (<2)
+    assert pp.parse_name("I'm Tarun") == ("self", "Tarun")
+    assert pp.parse_name("this is Alice Chen") == ("other", "Alice Chen")
+    # A 21-char single word is too long to be a plausible first name.
+    assert pp.parse_name("I'm Abcdefghijklmnopqrstu") is None  # 21 chars
 
 
 def test_match_then_name_merges_duplicates(tmp_path):

@@ -251,7 +251,13 @@ def summarize(person: Person) -> str | None:
 
 
 def parse_name(text: str) -> tuple[str, str] | None:
-    """('self'|'other', Name) when the sentence introduces someone."""
+    """('self'|'other', Name) when the sentence introduces someone.
+
+    A name is only mined from a transcript that already passed the voices-layer
+    gates, and even then must look like a name: alphabetic, 2-20 chars, capital
+    first letter (Whisper capitalizes proper nouns), not a sentence-initial
+    filler word. So "I'm gonna" / "I'm obviously" never enroll a person.
+    """
     for kind, pattern in (("self", FIRST_PERSON), ("other", THIRD_PERSON)):
         m = pattern.search(text)
         if not m:
@@ -259,6 +265,11 @@ def parse_name(text: str) -> tuple[str, str] | None:
         candidate = m.group(1).strip()
         first = candidate.split()[0]
         if first.lower() in STOPWORDS or len(first) < 2:
+            continue
+        # Plausible name: letters only, 2-20 chars total ("Alice", "Alice Chen").
+        if not (2 <= len(candidate) <= 20):
+            continue
+        if not candidate.replace(" ", "").isalpha():
             continue
         return kind, " ".join(w.capitalize() for w in candidate.split())
     return None

@@ -60,5 +60,15 @@ def transcribe(pcm: np.ndarray) -> str:
     if len(pcm) < RATE // 4:
         return ""
     audio = pcm.astype("float32") / 32768.0
-    result = mlx_whisper.transcribe(audio, path_or_hf_repo=WHISPER_MODEL, language="en", fp16=True)
+    # condition_on_previous_text=False stops the hallucination loop where Whisper
+    # carries a spurious prior transcript forward and invents more of the same on
+    # near-silence. language="en" keeps it off the multilingual guess that turns
+    # noise into foreign-script gibberish.
+    result = mlx_whisper.transcribe(
+        audio,
+        path_or_hf_repo=WHISPER_MODEL,
+        language="en",
+        condition_on_previous_text=False,
+        fp16=True,
+    )
     return result["text"].strip()

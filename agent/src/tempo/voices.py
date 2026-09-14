@@ -19,10 +19,15 @@ import numpy as np
 from .voice import RATE, transcribe
 
 BLOCK = 480  # 30 ms at 16 kHz
-MIN_SEGMENT_S = 0.8
+MIN_SEGMENT_S = 0.8        # whole segment (speech + trailing silence) must be this long
+MIN_SPEECH_S = 0.4        # ...and contain at least this much above-threshold speech,
+                          # so a sub-second noise burst never reaches Whisper
 MAX_SEGMENT_S = 12.0
 SILENCE_END_S = 0.7
-SPEECH_FLOOR_RMS = 320.0
+# Raised from 320: the MacBook's built-in mic sits at ~150-300 RMS on room tone
+# and keyboard/fan noise, which used to clear the old floor and feed Whisper
+# near-silence (its favourite hallucination regime). Real speech is well above.
+SPEECH_FLOOR_RMS = 520.0
 SPEECH_OVER_NOISE = 3.0
 VOICEPRINT_MIN_S = 1.0
 # Amelia's attribution threshold for ECAPA cosine.
@@ -32,6 +37,13 @@ ECAPA_DIR = Path(os.environ.get("TEMPO_ECAPA_DIR") or Path.home() / ".cache" / "
 JUNK = {"", "you", "thank you.", "thanks for watching.", "bye.", "thank you", ".",
         "yeah.", "yes.", "no.", "ok.", "okay.", "sure.", "sorry.", "right.", "wow.",
         "hmm.", "mm-hmm.", "uh-huh.", "laughs", "music", "[music]", "(music)", "?"}
+# Substrings Whisper emits when it invents content on noise (YouTube-style burn-in,
+# numeric timer readback, subtitle credits). Drop these before they can be filed
+# or enrolled as a name.
+HALLUCINATION_PHRASES = (
+    "subscribe", "dot com", ".com", "thanks for watching", "thank you for watching",
+    "please subscribe", "subtitles by", "subtitled by", "amara", "caption",
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +56,42 @@ class Segment:
 
 _classifier = None
 _classifier_lock = threading.Lock()
+
+
+def _is_garbage(text: str) -> bool:
+    """True if a transcript is a Whisper hallucination on noise, not real speech.
+
+    These must be dropped before they reach the people layer, so a garbage line
+    is never filed as an utterance and never mined for an "I'm X" name.
+    """
+    t = text.strip()
+    if len(t) < 3:
+        return True
+    low = t.lower()
+    if low in JUNK:
+        return True
+    for phrase in HALLUCINATION_PHRASES:
+        if phrase in low:
+            return True
+    # All-numeric / all-punctuation: "218 00 00 00", "...", "code 218 00".
+    letters = re.sub(r"[^A-Za-z]", "", t)
+    if len(letters) < 3:
+        return True
+    # Mostly numeric (timer / coordinate readback): "code 218 00 00 00 00".
+    digits = sum(c.isdigit() for c in t)
+    if digits and digits >= len(letters):
+        return True
+    # One word repeated: "fold fold fold", "ok ok ok", "uh uh", or one word
+    # dominating a short transcript ("shoot fold fold fold fold").
+    words = re.findall(r"[A-Za-z']+", low)
+    if len(words) >= 2:
+        from collections import Counter
+
+        counts = Counter(words)
+        top, n = counts.most_common(1)[0]
+        if len(counts) == 1 or (n >= 3 and n >= len(words) * 0.6):
+            return True
+    return False
 
 
 def voiceprint(pcm: np.ndarray) -> np.ndarray | None:
@@ -78,6 +126,7 @@ class Ear:
         self._chunks: list[np.ndarray] = []
         self._speaking = False
         self._silence_blocks = 0
+        self._speech_blocks = 0  # blocks actually above the speech threshold
         self._stream = None
 
     def start(self) -> None:
@@ -102,6 +151,7 @@ class Ear:
             self._speaking = True
             self._silence_blocks = 0
             self._chunks.append(block)
+            self._speech_blocks += 1
         elif self._speaking:
             self._chunks.append(block)
             self._silence_blocks += 1
@@ -112,10 +162,14 @@ class Ear:
 
     def _finish(self) -> None:
         pcm = np.concatenate(self._chunks) if self._chunks else np.zeros(0, dtype="int16")
+        speech_s = self._speech_blocks * BLOCK / RATE
         self._chunks = []
         self._speaking = False
         self._silence_blocks = 0
-        if len(pcm) / RATE >= MIN_SEGMENT_S:
+        self._speech_blocks = 0
+        # Need both a long-enough segment and enough real speech; a noise burst that
+        # happens to span MIN_SEGMENT_S but is mostly silence is rejected here.
+        if len(pcm) / RATE >= MIN_SEGMENT_S and speech_s >= MIN_SPEECH_S:
             self._queue.put(pcm)
 
     def _worker(self) -> None:
@@ -123,11 +177,7 @@ class Ear:
             pcm = self._queue.get()
             try:
                 text = transcribe(pcm).strip()
-                if text.lower() in JUNK or len(text) < 2:
-                    continue
-                # Drop transcripts that are only punctuation / filler noise.
-                letters = re.sub(r"[^A-Za-z]", "", text)
-                if len(letters) < 2:
+                if _is_garbage(text):
                     continue
                 self._on_segment(Segment(text, voiceprint(pcm), len(pcm) / RATE, time.time()))
             except Exception as exc:  # a bad segment must not kill the ear
