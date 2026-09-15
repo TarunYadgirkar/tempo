@@ -287,9 +287,9 @@ def bubble_text(person: Person) -> tuple[str, str]:
         lines.append(person.summary)
     said = person.last_said()
     if said:
-        lines.append(f"Said: “{said[:90]}”")
+        lines.append(f"Said: \"{said[:90]}\"")
     if not person.name:
-        lines.append("Not in memory yet. Say “this is Alice”, or let them say “I’m Alice”.")
+        lines.append("Not in memory yet. Say \"this is Alice\", or let them say \"I am Alice\".")
     elif not lines:
         lines.append(f"Seen {person.seen_count} times since {time.strftime('%b %d', time.localtime(person.first_seen))}.")
     return person.label, "\n".join(lines)
