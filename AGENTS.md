@@ -4,38 +4,34 @@ East v. West 72 Hour Hackathon entry. Solo (Tarun Yadgirkar, UC Berkeley), Deep 
 
 ## Ongoing
 
-Updated: 2026-09-13T20:40:00-07:00 by claude session
+Updated: 2026-09-14T22:35:00-07:00 by claude session
 
-Done (this session, all pushed to main):
-- Handoff files created: AGENTS.md + CLAUDE.md (@AGENTS.md). (3259f4c)
-- Check-in-3 submission doc drafted: docs/checkpoint-3-submission.md (structure from check-in-2; what changed since check-in 2 = people layer + launched-window fixes + hands gate; honest limits; 60s video TBD). (98d1dbd)
-- Placement eval extended: +10 requests (ids 21-30) in agent/eval/requests.json — 5 desk-in-view (expect:"table"), 5 object-anchored (expect:"object" + anchor); agent/eval/RUNBOOK.md. (75da639)
-- Scorer closed the object-anchor gap: agent/src/tempo/eval.py scores expect:"object" by Euclidean distance to the anchor object's 3D pos (threshold ANCHOR_NEAR_M=0.30), missing anchor = anchor_not_found; additive, legacy unchanged; 12 tests green. (d26218b)
-- Vertex AI opt-in inference path: agent/src/tempo/brain.py, TEMPO_USE_VERTEX=1 + TEMPO_VERTEX_PROJECT/TEMPO_VERTEX_LOCATION (defaults eastwest72hack26bos-505/us-central1), ADC, try/except fallback to API-key client; 16 tests green; no creds in code. (074833c)
-- WiLoR offline batch runner: hands/wilor_batch.py (record/run/compare; reuses hands geometry pipeline), hands/WILOR_DEPLOY.md (GCE L4 runbook), hands/wilor_requirements.txt; targets rolpotamias/WiLoR CVPR 2025; one gated step = MANO_RIGHT.pkl from mano.is.tue.mpg.de. (7f07b73)
-- Rig brought up: mac-shell pid 41795, packet_rate=3540, 3 panels, frame-export ON 30 Hz rgb8; daemons in detached screen sessions (hands 49318 / people 49316 / objects 49317); tempo scene sees 398 objects, 1 remembered place (charger), 1 person present.
+Done (pushed, main at dd2693d):
+- Check-in 4 and final submission text: docs/checkpoint-4-submission.md, docs/final-submission.md; README checkpoint log rows 3 and 4. Google Docs created in Drive: "Check in 4 doc" (Check in 4 folder) and "Final doc" (Final folder); the earlier [fill] template was renamed "Check in 4 template (superseded)". One bracket left for Tarun in the check-in-4 doc: the hardware (Pico/display) sentence.
+- People store: 15 duplicate identities merged into one "Tarun Yadgirkar" record (owner, 12 face vectors, clean summary). Finding: ArcFace cross-frame similarity 0.30 to 0.57 vs FACE_MATCH 0.42 spawned 32 records for one face; per-session clustering is the real fix.
+- people.py bubble text uses straight quotes (shell font has no curly-quote glyphs; they rendered as ???). 22 agent tests pass via `uv run --with pytest python -m pytest -q tests/` (pytest is not in the agent venv).
+- Rig staged for the final video: layout "final" saved = ring of 6 panels at 1.6 m facing the head with the centre open for hands (name note top-left, Remembered/charger note top-right, Safari left, Terminal right, Notes bottom-left, Finder bottom-right). Real Safari/Notes/Terminal windows captured via `launch-app com.apple.<Bundle>`.
 
 In flight:
-- gcloud CLI installed (584.0.0). Awaiting Tarun's `gcloud auth login` + `gcloud auth application-default login` + `gcloud config set project eastwest72hack26bos-505` to enable Vertex AI + Compute APIs and run the WiLoR GCE batch.
+- Tarun is recording the final demo on this layout (Mon ~10:35 PM PT). Do not restart the shell or touch panels until he says done.
+- Daemons in screen sessions: tempo-hands (13-16 fps), tempo-objects, tempo-people (started with --no-mic: the mic path throws PortAudio -50 and hangs the daemon before it logs "watching"). Logs at $TMPDIR/tempo-logs/*.log; stdout is block-buffered so the people log looks empty while it is running.
 
 Blocked (on Tarun):
-- Hardware session (~10 min): (1) point phone at a face, say "I'm Tarun" + two sentences, verify bubble + summary; (2) `uv run hands calibrate --write` then restart shell, record per-phase jitter; (3) fist -> launcher -> pinch on camera = check-in-3 video; (4) `tempo people me Tarun`.
-- Placement eval run needs the desk + target objects in the camera view (Tarun positions the rig); then `uv run tempo eval` per agent/eval/RUNBOOK.md.
-- WiLoR frame recording needs a hand in view — record during the hardware session (`hands/wilor_batch.py record --live "$TMPDIR/spatula-frames" --out <batchset> --seconds 30`).
-- MANO_RIGHT.pkl gated download (free registration at mano.is.tue.mpg.de) — the one non-scriptable WiLoR step.
-- gestures.toml still does not exist; hands calibrate --write never run on Tarun's hand.
-- siyi CRM notes need TEMPO_SIYI_URL + TEMPO_SIYI_KEY in agent env (Supabase from ~/TarunsCode/shared/siyi.app).
+- Final submission upload (video + docs are his), and the final email to hackofthrones@gmail.com.
+- gestures.toml still absent; `hands calibrate --write` never run cleanly on his hand.
+- 30-request placement eval never run; WiLoR never run (MANO gated); Vertex path never flipped on. All three are described honestly as not-done in the docs.
 
-Next (in priority order):
-1. Hardware session (above) -> check-in-3 video (OVERDUE; check-in 3 was due Sun 7 PM PT). Confirm with Tarun whether the 7 PM card was stamped.
-2. Run the placement eval with desk in view + object-anchored requests; update the README results table.
-3. Record the WiLoR frame set (hand in view), then run hands/wilor_batch.py on a GCE L4 (after gcloud auth) to publish WiLoR-vs-RTMPose accuracy + latency; tear the VM down before Mon 9 AM PT.
-4. Optionally flip TEMPO_USE_VERTEX=1 once ADC is authed (off critical path; falls back to API key if Vertex fails).
+Next:
+1. After the recording: staging mode that freezes gesture injection (pinch/fist fired mid-shot: launcher opened Terminal/Finder, gather-panels re-fanned the layout).
+2. `layout load` spawns duplicate notes and fans apps in front of the head instead of restoring saved poses; fix or document.
+3. Spawn pull-in uses the nearest depth surface, which is the wearer's own face when the phone is held selfie-style; clamp the minimum spawn distance.
+4. Bubble sizing for near faces (0.30 m offset fills the view at arm's length).
+5. Per-session face clustering instead of the constant FACE_MATCH.
 
 Notes:
-- Daemons run in screen sessions tempo-hands/tempo-people/tempo-objects (reattach `screen -r`); logs at $TMPDIR/tempo-logs/{hands,people,objects}.log.
+- The installed Spatula build predates 1eb0e88: `close-all` returns parse_error on the live shell. Close windows one by one.
+- `launch-app` wants a bundle id (com.apple.Safari); `app:Safari` yields a "no-window" placeholder card.
+- Screenshots right after `pose` catch panels mid-animation; wait ~4 s.
 - Never git add -A while background agents edit; stage by path.
-- The Gemini key lives in the agent env file; hooks block Claude from touching it and bash-guard rejects any Bash command naming it. Test env-dependent code via the CLI (tempo ...), never name the file in a command.
-- Git push from a normal terminal on the Mac (not device_bash).
-- Google Cloud project eastwest72hack26bos-505 is hard-deleted Mon Sep 14 noon ET = 9 AM PT = the final deadline. Nothing built on those credits can sit on the demo's critical path.
-- Scores so far: check-in 1 (8/4/6/8), check-in 2 (7/6/7/7) across Innovation/Technical/Business/Presentation. Innovation dropped a point at check-in 2; check-in 3 must show a visibly new capability on camera (people bubbles, hand-launch), not fixes.
+- Google Cloud project eastwest72hack26bos-505 (gcloud authed as devstar5053@gcplab.me) is hard-deleted at the deadline; nothing in the demo depends on it.
+- Scores: check-in 1 (8/4/6/8), check-in 2 (7/6/7/7); check-in 3 score not yet seen (no scorecard comment on the doc as of Mon 10:20 PM).
