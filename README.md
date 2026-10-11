@@ -1,6 +1,23 @@
 # Tempo
 
-East v. West 72 Hour Hackathon, Sep 12 to 14 2026. Team Tempo: Tarun Yadgirkar (UC Berkeley), solo. Track: Deep Tech / Physical AI. Freestyle entry.
+Tempo is an AR room agent. An iPhone strapped in front of a Mac streams head pose, LiDAR depth and hand skeletons; the Mac draws app windows and notes into the room, and an agent places them on the real wall or desk when you ask.
+
+[![Tempo demo: a name card and a remembered-place note pinned to the dorm wall, with the fist-opened app launcher held over the desk](assets/generated/tempo-poster.jpg)](https://youtu.be/_lzXbNahwd8)
+
+**[Watch the 95-second demo on YouTube](https://youtu.be/_lzXbNahwd8)**
+
+![A closed fist opens the radial launcher; moving the hand selects Terminal, then Safari, then Finder](assets/generated/tempo-launcher.gif)
+
+In the clip, the wearer makes a fist to open the launcher and steers it by moving the hand. The radial launcher comes from the brought-in compositor; its app entries were added during the hackathon. The two notes on the wall were placed by the agent: a name card and a remembered place marking where the charger lives ("where is my charger" points back to it).
+
+Built solo by Tarun Yadgirkar (UC Berkeley) at the East v. West 72 Hour Hackathon, Sep 12 to 14 2026, Deep Tech / Physical AI track. The compositor in `shell/` was brought in from earlier work, not written during the 72 hours; see [Prior work](#prior-work).
+
+Judge check-in scores:
+
+| Check-in | Innovation | Technical | Business | Presentation |
+|---|---|---|---|---|
+| 1 | 8 | 4 | 6 | 8 |
+| 2 | 7 | 6 | 7 | 7 |
 
 ## The question
 
@@ -19,8 +36,8 @@ The precise version: **how much does explicit room geometry buy an embodied agen
 An AR shell for glasses, running today on an iPhone strapped in front of a Mac.
 
 - **iPhone** streams ARKit head pose, LiDAR depth, detected planes, camera frames, and 21-joint hand skeletons over UDP.
-- **Mac compositor** (`shell/`) renders passthrough plus real Mac app windows as panels in 3D, with pinch-to-click, a spatial keyboard, and plane anchoring. Everything is driven through a line-protocol control socket.
-- **Room agent** (`agent/`) is new this weekend. It takes a snapshot of what the wearer sees, the scene geometry (head pose, surfaces classified as table / wall / floor with distances, existing panels), and a spoken or typed request, sends them to Gemini with a small set of spatial tools, and executes the returned actions against the compositor: place a note near the thing you pointed at, open an app where you're looking, move a panel onto the table, gather lost windows.
+- **Mac compositor** (`shell/`, brought in from Vantage, not hackathon work) renders passthrough plus real Mac app windows as panels in 3D, with pinch-to-click, a spatial keyboard, and plane anchoring. Everything is driven through a line-protocol control socket.
+- **Room agent** (`agent/`) is new this weekend. It takes a snapshot of what the wearer sees, the scene geometry (head pose, surfaces classified as table / wall / floor with distances, existing panels), and a spoken or typed request, sends them to Gemini (`gemini-3.8-flash`, set once in `agent/src/tempo/models.py`, override with `TEMPO_MODEL`) with a small set of spatial tools, and executes the returned actions against the compositor: place a note near the thing you pointed at, open an app where you're looking, move a panel onto the table, gather lost windows.
 
 The agent never gets pixels-only or geometry-only. It gets both, which is what lets it answer "put that on the wall behind the monitor" with a world coordinate.
 
@@ -80,9 +97,21 @@ cd ../hands && uv run hands calibrate --write   # open / pinch / fist, 6 s each;
 
 Without a phone: `SPATULA_MAC_HEADLESS=1 shell/build/mac-shell/mac-shell --replay shell/tests/recorded-sessions/initial.bin` replays a recorded session so `head-pose` and `list-planes` work (screenshot needs the windowed renderer).
 
+## Tests
+
+```bash
+cd agent && uv run pytest          # 22 tests: tool calls, placement eval scoring, people store
+cd hands && uv run pytest          # 90 tests: keypoints, geometry, calibration, tracker
+cd shell && ./scripts/test-mac.sh  # 31 ctest entries across gesture-engine, bridge-receiver, mac-shell
+```
+
+Two compositor entries depend on the machine. `screenshot_e2e` needs a display that is presenting frames and skips otherwise. The three `eval_dataset_*_smoke` entries run the gesture engine over the labelled iPhone clips in `~/spatial-os-recordings`, skip when that folder is absent, and report the detection score without failing on it (27 of 54 keyed clips on the last run). Run `shell/scripts/eval_dataset.py` without `--smoke` to gate on the score.
+
 ## Prior work
 
-`shell/` is carried over from our prior private project (Spatula / Vantage, Project Ithaca) as the compositor base; see `shell/PRIOR_ART.md`. Everything in `agent/`, this README, and every change listed in `shell/HACK_CHANGES.md` was built during the hackathon.
+`shell/` was brought in, not built during the 72 hours. It is the compositor from Vantage (Project Ithaca), a private AR glasses startup Tarun co-founded with Boris Nezlobin: the Metal renderer, scene core and control socket, the iPhone sensor bridge, the gesture engine, and their tests. `shell/PRIOR_ART.md` lists exactly what was copied.
+
+Built during the hackathon: everything in `agent/` and `hands/`, this README, and every compositor change listed in `shell/HACK_CHANGES.md` (new control verbs such as `cast`, `note` and `close-all`, note panels, spawn placement, the launcher's app entries).
 
 ## Checkpoint log
 
@@ -100,7 +129,7 @@ Without a phone: `SPATULA_MAC_HEADLESS=1 shell/build/mac-shell/mac-shell --repla
 | Image + geometry | 0.25 | 0.55 m | 3.7 s |
 | Image only (model guesses metre offsets) | 0.45 | 0.36 m | 4.4 s |
 
-Twenty requests each, one room, same model and prompt. The geometry condition lost, and the identical 0.55 m error on every "desk" request says why: the LiDAR *plane list* the compositor exposes is sparse and stale. At run time it held eight vertical planes and a ceiling; the bed the wearer was looking at had been classified vertical and the desk was absent, so the gaze ray hit no horizontal surface and the executor fell back to a fixed offset ahead of the head. The image-only model, guessing "about 0.7 m ahead and 0.3 m down", landed closer.
+Twenty requests each, one room, same model and prompt (`gemini-3.6-flash`, the model the agent used during the hackathon). The geometry condition lost, and the identical 0.55 m error on every "desk" request says why: the LiDAR *plane list* the compositor exposes is sparse and stale. At run time it held eight vertical planes and a ceiling; the bed the wearer was looking at had been classified vertical and the desk was absent, so the gaze ray hit no horizontal surface and the executor fell back to a fixed offset ahead of the head. The image-only model, guessing "about 0.7 m ahead and 0.3 m down", landed closer.
 
 So the baseline is doing its job: it shows that geometry only helps when the geometry is actually there.
 
