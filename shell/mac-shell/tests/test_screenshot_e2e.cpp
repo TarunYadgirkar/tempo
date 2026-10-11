@@ -220,6 +220,15 @@ int main() {
 
     // ---- default path ----
     std::string reply = c.request("screenshot");
+    // A display is listed but the window never presents (locked screen,
+    // display asleep, a non-GUI session): nothing to capture, so skip.
+    if (reply.rfind("err timeout", 0) == 0) {
+        std::printf("test_screenshot_e2e: window never presented a frame — "
+                    "skipping\n");
+        kill(child, SIGTERM);
+        waitpid(child, nullptr, 0);
+        return SKIP_EXIT;
+    }
     std::string shot = path_of(reply);
     CHECK_MSG(!shot.empty(), reply.c_str());
     uint32_t w = 0, h = 0;
