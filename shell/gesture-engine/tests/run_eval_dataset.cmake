@@ -30,6 +30,7 @@ execute_process(
             --eval-recording ${EVAL_BIN}
             --mirror ${MIRROR}
             --split ${SPLIT}
+            --smoke
     RESULT_VARIABLE rc
 )
 

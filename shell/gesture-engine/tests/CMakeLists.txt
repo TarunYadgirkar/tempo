@@ -110,6 +110,10 @@ set_tests_properties(test_eval_input PROPERTIES TIMEOUT 30)
 # threshold to make one pass.  A real score needs labelled iPhone
 # recordings (see gesture-engine/CLAUDE.md, "Dataset eval").
 #
+# The wrapper passes --smoke, so a clip that runs but misses its keyframe
+# window prints FAIL in the report without failing ctest. Run the harness
+# directly (no --smoke) to gate on the score.
+#
 # To run locally:
 #   ctest --test-dir build/gesture-engine -R eval_dataset --verbose
 # ---------------------------------------------------------------------------

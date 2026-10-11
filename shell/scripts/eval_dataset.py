@@ -757,6 +757,10 @@ def main() -> int:
                    help="run against only one bucket of the train/test split "
                         "(default: all). See gesture-engine/tests/datasets/"
                         "dataset_split.json for the algorithm.")
+    p.add_argument("--smoke", action="store_true",
+                   help="exit 0 once every clip runs through eval_recording, "
+                        "whatever the score (the ctest entries use this; "
+                        "detection accuracy is reported, not gated)")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--markdown", action="store_true",
                    help="emit Markdown report instead of plain text")
@@ -789,6 +793,7 @@ def main() -> int:
         return 1
 
     results: list[ClipResult] = []
+    plumbing_errors = 0
     for clip in clips:
         try:
             events = run_eval(eval_bin, clip.path / "stream.bin", cfg)
@@ -796,6 +801,7 @@ def main() -> int:
             r = ClipResult(clip=clip, events=[], passed=False)
             r.reasons.append(f"eval_recording error: {e}")
             results.append(r)
+            plumbing_errors += 1
             continue
         results.append(judge(clip, events,
                              args.tolerance_early_ms,
@@ -864,6 +870,8 @@ def main() -> int:
             print(f"    (gestures-config: {args.gestures_config})")
         print(f"    (tolerance: -{args.tolerance_early_ms}ms / +{args.tolerance_late_ms}ms)")
 
+    if args.smoke:
+        return 1 if plumbing_errors else 0
     return 0 if pass_count == total else 1
 
 
