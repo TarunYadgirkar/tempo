@@ -52,7 +52,7 @@ cd ../hands && uv run hands calibrate --write                          # open / 
 
 Checks: `pgrep -fl mac-shell`; `printf 'stats\n' | nc -U $TMPDIR/spatial-os.sock` (use the Python client in `hands/src/hands/control.py` if nc prints nothing). `packet_rate=0` means the phone is not streaming. `frame-export status` must be `on` for the hands/people/objects daemons; a shell restart turns it off, `hands track --enable-export` turns it back on. Restarting the shell needs Tarun's OK when he might be recording.
 
-Gemini key: `GEMINI_API_KEY` in the agent's env file, model `gemini-3.6-flash`. Hooks block Claude from touching that file, and the bash-guard hook rejects any Bash command whose text even mentions its filename: test env-dependent code through the CLI (`tempo ...`), never name the file in a command.
+Gemini key: `GEMINI_API_KEY` in the agent's env file, model `gemini-3.8-flash` (set in `agent/src/tempo/models.py`). Hooks block Claude from touching that file, and the bash-guard hook rejects any Bash command whose text even mentions its filename: test env-dependent code through the CLI (`tempo ...`), never name the file in a command.
 
 ### Phone (SpatialBridge)
 

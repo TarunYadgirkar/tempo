@@ -7,9 +7,9 @@ from google import genai
 from google.genai import types
 
 from .actions import DECLARATIONS, PIXELS_DECLARATIONS
+from .models import gemini_model
 from .perception import Snapshot
 
-DEFAULT_MODEL = "gemini-3.6-flash"
 
 # Vertex AI opt-in. The API-key path stays the default; Vertex is used only when
 # TEMPO_USE_VERTEX=1. On any Vertex construction failure we log one line and fall
@@ -81,7 +81,7 @@ class Brain:
     def __init__(self, model: str | None = None, geometry: bool = True) -> None:
         self.geometry = geometry
         self.client = _build_client()
-        self.model = model or os.environ.get("TEMPO_MODEL", DEFAULT_MODEL)
+        self.model = model or gemini_model()
 
     def decide(self, request: str, snap: Snapshot, audio: bytes | None = None) -> tuple[list[types.FunctionCall], str]:
         parts: list[types.Part] = [

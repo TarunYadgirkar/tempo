@@ -24,6 +24,7 @@ import numpy as np
 
 from . import objects, siyi, spatial
 from .faces import FACE_MATCH, Face, FaceEngine, similarity
+from .models import gemini_model
 from .shell import Shell, ShellError
 from .voices import VOICE_MATCH, Ear, Segment
 
@@ -240,7 +241,7 @@ def summarize(person: Person) -> str | None:
     who = person.name or "an unnamed person"
     try:
         resp = _gemini.models.generate_content(
-            model=os.environ.get("TEMPO_MODEL", "gemini-3.6-flash"),
+            model=gemini_model(),
             contents=f"{SUMMARY_PROMPT}\n\nPerson: {who}\n{lines}",
         )
         text = (resp.text or "").strip().splitlines()
